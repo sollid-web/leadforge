@@ -1,0 +1,7 @@
+"use client";
+
+import Link from "next/link";
+import { FormEvent, useState } from "react";
+import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
+
+export default function ResetPasswordPage() { const [email, setEmail] = useState(""); const [message, setMessage] = useState(""); async function submit(event: FormEvent<HTMLFormElement>) { event.preventDefault(); const supabase = getSupabaseBrowserClient(); if (!supabase) { setMessage("Demo mode is active. Configure Supabase to enable password recovery."); return; } const { error } = await supabase.auth.resetPasswordForEmail(email, { redirectTo: `${window.location.origin}/auth/callback?next=/reset-password` }); setMessage(error ? error.message : "If an account exists for that email, a recovery link has been sent."); } return <main className="auth-page"><div className="auth-card"><Link href="/sign-in" className="brand auth-brand"><span className="brand-mark">L</span><span>lead<span>forge</span></span></Link><div className="auth-heading"><p className="eyebrow">Account recovery</p><h1>Reset your password</h1><p>We&apos;ll send a secure recovery link to your work email.</p></div><form onSubmit={submit} className="auth-form"><label>Work email<input type="email" value={email} onChange={(event) => setEmail(event.target.value)} required placeholder="you@agency.com" /></label>{message && <p className="auth-message">{message}</p>}<button className="primary-button auth-submit">Send recovery link</button></form><p className="auth-footer"><Link href="/sign-in">← Back to sign in</Link></p></div></main>; }

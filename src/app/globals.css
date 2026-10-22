@@ -1,0 +1,2 @@
+
+.approval-note { display:flex; align-items:flex-start; gap:9px; background:#f3f8f6; border:1px solid #dcece5; border-radius:7px; padding:10px 11px; margin:2px 0 8px; }.approval-note>span { color:#3f916e; font-size:12px; font-weight:700; }.approval-note p { color:#779189; font-size:9px; line-height:1.45; margin:0; }.approval-note b { color:#376c5c; }
