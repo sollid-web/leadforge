@@ -25,6 +25,12 @@ export const listingInputSchema = z.object({
     ownerName: z.string().trim().max(200).optional(),
     ownerEmail: z.string().trim().email().max(254).optional(),
     ownerPhone: z.string().trim().max(40).optional(),
+    listingAgentName: z.string().trim().max(200).optional(),
+    listingAgentEmail: z.string().trim().email().max(254).optional(),
+    listingAgentPhone: z.string().trim().max(40).optional(),
+    listingOfficeName: z.string().trim().max(200).optional(),
+    listingOfficeEmail: z.string().trim().email().max(254).optional(),
+    listingOfficePhone: z.string().trim().max(40).optional(),
     notes: z.string().trim().max(2000).optional(),
   }).optional(),
 });

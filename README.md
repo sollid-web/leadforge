@@ -1,22 +1,22 @@
 # LeadForge
 
-LeadForge is an early-stage real-estate opportunity discovery and agent-routing MVP. It ingests manually entered or explicitly approved listing summaries, normalizes and deduplicates them, applies explainable quality signals, and ranks organization agents by service area, specialty, and budget.
+LeadForge is an early-stage real-estate opportunity discovery and agent-routing MVP. It supports manual entry and approved-source ingestion, including scheduled RentCast searches for US listings, then normalizes and deduplicates opportunities, applies explainable quality signals, and ranks organization agents by service area, specialty, and budget.
 
 The product is intentionally not a scraper or bulk messaging tool. It does not contact property owners. Agents receive summary-only opportunities, and private property or owner details remain encrypted and inaccessible until an agent requests access and an organization manager explicitly approves that request. The matched agent's detail access is audited.
 
-**Project status:** working MVP foundation, not a complete or production-certified SaaS. Live database behavior requires a Supabase project and the migrations in this repository. No sample records are used as operational data.
+**Project status:** working MVP foundation, not a complete or production-certified SaaS. Automated US listing discovery is available through the RentCast API when a workspace source is configured and approved and the server has a provider key. Coverage depends on the provider and search area; this is not a global MLS connection. No sample records are used as operational data.
 
 ## Current product flows
 
 1. An authenticated user creates an organization from **Settings**. The creator becomes its owner.
-2. A manager manually records an opportunity or an owner/admin registers and approves an external source.
-3. A manager enters a normalized source record, or a configured source submits a summary-only webhook payload.
-4. LeadForge normalizes fields, checks an organization-scoped dedupe key, stores a sanitized source snapshot, calculates evidence-based scores, and records source health and an audit event.
-5. A manager can verify an owner-listed claim against an evidence reference, then calculate ranked agent matches. Agents can see matched summaries and explicitly request details.
+2. A manager manually records an opportunity, registers a webhook source, or configures a RentCast search by ZIP code or city/state.
+3. External sources stay inactive until an owner/admin approves them. An authenticated daily RentCast sync fetches up to 100 US sale or long-term rental listings from one configured search per job; each source is subject to a 24-hour lock.
+4. LeadForge normalizes and deduplicates provider records, stores sanitized snapshots, calculates explainable scores, encrypts listing-agent/office contacts and full addresses, and records source health and audit events.
+5. New listings are automatically ranked against active agent profiles; matching summaries are available in-app. Agents can explicitly request details.
 6. A manager approves or rejects each request with a reason. Approval is scoped to the requesting agent; the detail endpoint checks the match, interest, approval, active-agent state, and current suppression state.
 7. A detail response is decrypted on the server and emitted with `Cache-Control: private, no-store`; the reveal is audit logged. Suppression blocks later reveals and revokes related approvals.
 
-Optional agent email is sent through Resend only after the agent opts in and a manager manually confirms each summary message. It includes no private owner/property details and requires provider configuration. Automatic owner outreach, AI scoring, and a source crawler are not implemented. The n8n export is a disabled webhook orchestration template.
+Optional agent email is sent through Resend only after the agent opts in and a manager manually confirms each summary message. It includes no private owner/property details and requires provider configuration. RentCast listing-agent/office contacts are not owner contacts and are never sent an automated message. Arbitrary website scraping, global MLS access, and AI scoring are not implemented. The n8n export is a disabled webhook orchestration template.
 
 ## Stack
 
@@ -37,7 +37,7 @@ cp .env.example .env.local
 pnpm dev
 ```
 
-Apply both ordered SQL migrations to a new Supabase project using the SQL editor or Supabase CLI:
+Apply the ordered SQL migrations to a new Supabase project using the SQL editor or Supabase CLI. Migration `202610250002` grants API-role table privileges; the latest migration adds RentCast source configuration and sync locking. Row-level security still restricts which records each user can access:
 
 ```bash
 supabase login
@@ -55,25 +55,31 @@ See [`.env.example`](./.env.example). Required for the core application:
 | --- | --- |
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase publishable/anon key; browser-exposed by design and constrained by RLS |
-| `SUPABASE_SERVICE_ROLE_KEY` | Server-only key used by source-token ingestion, scheduled health checks, and confirmed-email recipient lookup |
+| `SUPABASE_SERVICE_ROLE_KEY` | Server-only key used by source-token ingestion, scheduled sync/health checks, and confirmed-email recipient lookup |
 | `OWNER_DATA_ENCRYPTION_KEY` | Base64-encoded 32-byte AES key for private detail payloads |
 | `NEXT_PUBLIC_APP_URL` | Public application URL used in agent notification links |
 | `RESEND_API_KEY` | Optional server-only Resend credential for manager-confirmed agent summary emails |
 | `RESEND_FROM_EMAIL` | Verified sender address used for agent summary emails |
-| `CRON_SECRET` | Optional server-only bearer secret for scheduled source-health checks |
+| `CRON_SECRET` | Server-only bearer secret for scheduled sync and source-health jobs |
+| `RENTCAST_API_KEY` | Optional server-only RentCast API credential for US listing discovery |
 
-Generate an encryption key with `openssl rand -base64 32`. Never use a real key in a committed file. Keep `SUPABASE_SERVICE_ROLE_KEY`, `OWNER_DATA_ENCRYPTION_KEY`, `RESEND_API_KEY`, and `CRON_SECRET` in deployment secret storage; none belongs in a `NEXT_PUBLIC_` variable. Losing the encryption key makes encrypted private details unrecoverable. Key rotation is an operational procedure and is not automated by this MVP.
+Generate an encryption key with `openssl rand -base64 32`. Never use a real key in a committed file. Keep `SUPABASE_SERVICE_ROLE_KEY`, `OWNER_DATA_ENCRYPTION_KEY`, `RESEND_API_KEY`, `RENTCAST_API_KEY`, and `CRON_SECRET` in deployment secret storage; none belongs in a `NEXT_PUBLIC_` variable. Losing the encryption key makes encrypted private details unrecoverable. Key rotation is an operational procedure and is not automated by this MVP.
 
 ## Source and privacy rules
 
 - Manual entry is available to organization managers and is scoped to the authenticated organization.
 - External sources are created inactive and unapproved. An owner/admin must verify their permission and HTTPS source URL before enabling them.
 - External source registration returns a random, source-scoped bearer token once. Store it in a secret manager. The database stores only its SHA-256 hash.
+- RentCast searches are limited to one ZIP code or city/state and a maximum of 100 results per source sync. A database-backed claim prevents concurrent runs and enforces a 24-hour cadence.
+- Each scheduled invocation makes at most one RentCast API request; additional approved sources are deferred and prioritized by oldest sync attempt to bound provider usage.
+- Provider-supplied full addresses and listing-agent/office contacts are encrypted as private listing details. They are not labeled as owner data and are not placed in source snapshots, audit metadata, match summaries, or email.
+- RentCast API access requires a valid provider key and a source explicitly approved by an organization owner/admin. Review the provider's current terms and applicable law before use.
 - `POST /api/ingestion/listings` accepts public listing fields only and authenticates the source token. It cannot accept the private-detail object.
 - `POST /api/automation/source-health` is a scheduled-job endpoint. Configure `CRON_SECRET` and call it hourly with `Authorization: Bearer …`; it marks sources degraded after 24 hours and failed after 72 hours without successful ingestion. It checks stored ingestion timestamps only and never fetches arbitrary source URLs.
 - No listing website is fetched or scraped by the app. Do not ingest data unless the source terms and applicable law permit it.
 - Private address and owner fields entered through the authenticated app are AES-GCM encrypted before database storage. Contact permission starts as `unknown`; the app does not send owner messages.
 - Full detail access is restricted to the matched agent with an approved interest request. Every reveal, approval, source decision, and suppression is audited.
+- RentCast API terms prohibit automated website querying and unsolicited commercial email; this integration uses the provider API, does not scrape listing websites, and does not contact listing agents automatically.
 - A verified opt-out can suppress an opportunity and mark owner contact permission as opted out.
 
 For security boundaries, limitations, and vulnerability reporting, see [`SECURITY.md`](./SECURITY.md). For the schema and request lifecycle see [`docs/architecture-plan.md`](./docs/architecture-plan.md).
@@ -88,6 +94,7 @@ For security boundaries, limitations, and vulnerability reporting, see [`SECURIT
 | `GET/POST /api/listings` | List summaries / manager manual ingestion |
 | `POST /api/ingestion/listings` | Source-token webhook ingestion (service role required) |
 | `POST /api/automation/source-health` | Scheduled status calculation for approved external sources (requires `CRON_SECRET`) |
+| `POST /api/automation/rentcast-sync` | Scheduled, approval-gated RentCast discovery, scoring, and agent matching (requires `CRON_SECRET`, `RENTCAST_API_KEY`, and the encryption key) |
 | `POST /api/listings/:id/matches` | Rank active agent profiles and save matches |
 | `POST /api/listings/:id/verification` | Record a manager's owner-claim verification decision and evidence |
 | `GET /api/matches` | Return matched summary opportunities for the current agent |

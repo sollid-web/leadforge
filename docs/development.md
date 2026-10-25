@@ -24,7 +24,7 @@ For scheduled source-health checks, also set a random server-only `CRON_SECRET` 
 
 Do not commit `.env.local`, paste credentials into logs, or put server-only keys in `NEXT_PUBLIC_*` variables.
 
-Apply the migrations in timestamp order:
+Apply the migrations in timestamp order (migration `202610250002` grants API-role table privileges needed to use RLS-protected tables):
 
 ```bash
 supabase login
@@ -32,7 +32,13 @@ supabase link --project-ref YOUR_PROJECT_REF
 supabase db push
 ```
 
-Alternatively, run both files under [`supabase/migrations`](../supabase/migrations/) in the Supabase SQL editor. The first migration contains the current organization and legacy inbound-lead tables; the second adds the opportunity workflow and RLS rules.
+Alternatively, run the files under [`supabase/migrations`](../supabase/migrations/) in timestamp order in the Supabase SQL editor. The first migration contains the current organization and legacy inbound-lead tables; the second adds the opportunity workflow and RLS rules; the third grants API-role table privileges; the fourth adds RentCast search configuration and safe sync claiming.
+
+With a running local Supabase stack, apply pending migration files with:
+
+```bash
+supabase migration up --local
+```
 
 Start the app:
 
@@ -41,6 +47,12 @@ pnpm dev
 ```
 
 Create an account at `/sign-up`, confirm it if required by Supabase Auth, and sign in. Use **Settings** to create the organization, save an agent profile, and register sources. Manual sources are enabled on registration. External sources remain disabled until an organization owner/admin verifies permission and explicitly enables them.
+
+## RentCast scheduled discovery
+
+To enable US listings, obtain a RentCast API key and configure it as the server-only `RENTCAST_API_KEY`. Set `CRON_SECRET` and `OWNER_DATA_ENCRYPTION_KEY` as well. In Settings, register a RentCast search with either one 5-digit ZIP code or a city and two-letter state, select sale or long-term rental, and set a result cap of at most 100. An organization owner/admin must approve the source before it can run.
+
+Schedule an authenticated daily POST to `/api/automation/rentcast-sync`. Each approved source can be fetched at most once every 24 hours, including concurrent scheduler calls; each job invocation makes no more than one provider request and prioritizes the least recently synced source. The connector calls only RentCast's fixed API host. It encrypts full addresses and listing-agent/office contacts; it does not represent those contacts as property owners, email them, or include them in summaries, snapshots, or audit metadata. Review current provider terms and legal obligations before enabling a source.
 
 ## Safe source testing
 
@@ -83,6 +95,7 @@ pnpm build
 - Use separate Supabase projects and encryption keys per environment.
 - Set server-only keys only in hosting secret storage.
 - Set `CRON_SECRET` in hosting secrets and configure an hourly authenticated request to `/api/automation/source-health`.
+- After setting `RENTCAST_API_KEY` and approving a search, schedule a daily authenticated request to `/api/automation/rentcast-sync`.
 - Configure Auth email, redirect URLs, and verified-email policy.
 - Review all source approvals and user opt-out rules before enabling ingestion.
 - Keep n8n disabled until its inbound authentication and source-scoped outbound bearer credential are configured.

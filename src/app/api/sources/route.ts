@@ -11,7 +11,28 @@ const sourceSchema = z.object({
     const parsed = new URL(value);
     return parsed.protocol === "https:" && !parsed.username && !parsed.password;
   }, "Source URL must use HTTPS and must not contain credentials").optional(),
+  rentcast: z.object({
+    listingType: z.enum(["sale", "rental"]),
+    city: z.string().trim().min(2).max(120).optional(),
+    state: z.string().trim().length(2).toUpperCase().regex(/^[A-Z]{2}$/).optional(),
+    zipCode: z.string().trim().regex(/^\d{5}$/).optional(),
+    maxResults: z.number().int().min(1).max(100).default(50),
+  }).optional().refine((value) => {
+    if (!value) return true;
+    const hasZip = Boolean(value.zipCode);
+    const hasCityAndState = Boolean(value.city && value.state);
+    return hasZip !== hasCityAndState && !(hasZip && (value.city || value.state));
+  }, {
+    message: "Configure either a ZIP code or both city and state",
+  }),
   optOutInstructions: z.string().trim().max(1000).optional(),
+}).superRefine((value, context) => {
+  if (value.sourceType === "public_api" && !value.rentcast) {
+    context.addIssue({ code: "custom", path: ["rentcast"], message: "RentCast search settings are required for public API sources" });
+  }
+  if (value.sourceType !== "public_api" && value.rentcast) {
+    context.addIssue({ code: "custom", path: ["rentcast"], message: "Provider settings are only supported for public API sources" });
+  }
 });
 
 export async function GET() {
@@ -23,7 +44,7 @@ export async function GET() {
   if (membershipError) return NextResponse.json({ error: "Unable to load organization membership" }, { status: 500 });
   if (!member) return NextResponse.json({ error: "No organization membership found" }, { status: 403 });
   const { data, error } = await supabase.from("listing_sources")
-    .select("id,name,source_key,source_type,source_url,approved,active,opt_out_instructions,created_at,source_health(status,last_checked_at,last_success_at,consecutive_failures,message)")
+    .select("id,name,source_key,source_type,source_url,configuration,approved,active,opt_out_instructions,created_at,source_health(status,last_checked_at,last_success_at,last_sync_attempt_at,consecutive_failures,message)")
     .eq("organization_id", member.organization_id)
     .order("created_at", { ascending: false });
   if (error) return NextResponse.json({ error: "Unable to load sources" }, { status: 500 });
@@ -43,19 +64,22 @@ export async function POST(request: Request) {
 
   const sourceKey = parsed.data.name.toLocaleLowerCase("en").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
   const manual = parsed.data.sourceType === "manual";
-  const ingestionToken = manual ? null : randomBytes(32).toString("base64url");
+  const apiSource = parsed.data.sourceType === "public_api";
+  const ingestionToken = manual || apiSource ? null : randomBytes(32).toString("base64url");
+  const configuration = apiSource ? { provider: "rentcast", ...parsed.data.rentcast } : {};
   const { data, error } = await supabase.from("listing_sources").insert({
     organization_id: member.organization_id,
     name: parsed.data.name,
     source_key: sourceKey,
     source_type: parsed.data.sourceType,
-    source_url: parsed.data.sourceUrl ?? null,
+    source_url: apiSource ? "https://api.rentcast.io" : parsed.data.sourceUrl ?? null,
+    configuration,
     ingestion_token_hash: ingestionToken ? createHash("sha256").update(ingestionToken).digest("hex") : null,
     approved: manual,
     active: manual,
     opt_out_instructions: parsed.data.optOutInstructions ?? null,
     created_by: user.id,
-  }).select("id,name,source_key,source_type,source_url,approved,active,created_at").single();
+  }).select("id,name,source_key,source_type,source_url,configuration,approved,active,created_at").single();
   if (error) return NextResponse.json({ error: error.code === "23505" ? "A source with this name already exists" : "Unable to create source" }, { status: error.code === "23505" ? 409 : 500 });
   try {
     await writeAuditLog(supabase, {
@@ -70,6 +94,7 @@ export async function POST(request: Request) {
     return NextResponse.json({
       error: "Source was created but the audit record could not be written; retain the token below and resolve the audit issue before enabling the source",
       data,
+      ...(apiSource ? { setupInstructions: "Configure RENTCAST_API_KEY on the server, then an owner/admin must approve the source. Scheduled sync runs at most once per source every 24 hours." } : {}),
       ...(ingestionToken ? { ingestionToken } : {}),
     }, { status: 500 });
   }

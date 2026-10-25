@@ -7,6 +7,8 @@ export async function GET() {
       supabase: Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY),
       ingestionServiceRole: Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY),
       ownerDataEncryption: Boolean(process.env.OWNER_DATA_ENCRYPTION_KEY),
+      rentcast: Boolean(process.env.RENTCAST_API_KEY),
+      scheduledJobs: Boolean(process.env.CRON_SECRET),
     },
   }, { headers: { "Cache-Control": "no-store" } });
 }

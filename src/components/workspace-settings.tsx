@@ -9,9 +9,10 @@ type Source = {
   name: string;
   source_type: string;
   source_url: string | null;
+  configuration: { provider?: string; listingType?: string; city?: string; state?: string; zipCode?: string; maxResults?: number } | null;
   approved: boolean;
   active: boolean;
-  source_health: { status: "healthy" | "degraded" | "failed" | "unknown"; last_checked_at: string | null; last_success_at: string | null; consecutive_failures: number; message: string | null } | null;
+  source_health: { status: "healthy" | "degraded" | "failed" | "unknown"; last_checked_at: string | null; last_success_at: string | null; last_sync_attempt_at?: string | null; consecutive_failures: number; message: string | null } | null;
 };
 
 async function responseError(response: Response) {
@@ -23,6 +24,7 @@ export function WorkspaceSettings() {
   const [organizations, setOrganizations] = useState<{ organization_id: string; role: string; organizations: { name: string } | null }[]>([]);
   const [sources, setSources] = useState<Source[]>([]);
   const [userId, setUserId] = useState("");
+  const [sourceType, setSourceType] = useState("manual");
   const [integrations, setIntegrations] = useState<Record<string, boolean>>({});
   const [hasAgentProfile, setHasAgentProfile] = useState(false);
   const [notifyEmail, setNotifyEmail] = useState(false);
@@ -106,6 +108,7 @@ export function WorkspaceSettings() {
     event.preventDefault();
     const form = event.currentTarget;
     const values = new FormData(form);
+    const selectedSourceType = String(values.get("sourceType"));
     setError("");
     try {
       const response = await fetch("/api/sources", {
@@ -113,16 +116,28 @@ export function WorkspaceSettings() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
         name: values.get("name"),
-        sourceType: values.get("sourceType"),
+        sourceType: selectedSourceType,
         sourceUrl: values.get("sourceUrl") || undefined,
         optOutInstructions: values.get("optOutInstructions") || undefined,
+        ...(selectedSourceType === "public_api" ? {
+          rentcast: {
+            listingType: values.get("listingType"),
+            zipCode: values.get("zipCode") || undefined,
+            city: values.get("city") || undefined,
+            state: values.get("state") || undefined,
+            maxResults: Number(values.get("maxResults") || 50),
+          },
+        } : {}),
         }),
       });
       const result = await response.json();
       setNewToken(typeof result.ingestionToken === "string" ? result.ingestionToken : "");
       if (!response.ok) throw new Error(result.error ?? `Request failed (${response.status})`);
-      setNotice("Source recorded. Non-manual sources remain inactive until an owner or admin approves them.");
+      setNotice(selectedSourceType === "public_api"
+        ? "RentCast search registered. Add the server API key and have an owner/admin approve the source before scheduling sync."
+        : "Source recorded. Non-manual sources remain inactive until an owner or admin approves them.");
       form.reset();
+      setSourceType("manual");
       await load();
     } catch (reason) { setError(reason instanceof Error ? reason.message : "Unable to create source."); }
   }
@@ -203,15 +218,28 @@ export function WorkspaceSettings() {
           {hasAgentProfile ? <label className="checkbox-label"><input type="checkbox" checked={notifyEmail} disabled={savingEmailPreference} onChange={(event) => void updateEmailPreference(event.target.checked)} />Allow managers to email me summary-only opportunity matches</label> : <p>Create an agent profile to manage this preference. Email is off by default.</p>}
           <small>Messages never include owner contact information or full property details. You can turn off notifications here at any time.</small>
         </section>
-        <section className="panel settings-card" id="sources"><div className="panel-header"><div><h2>Approved listing sources</h2><p>Only manually entered records or explicitly approved feeds can be ingested. LeadForge does not scrape arbitrary sites.</p></div></div>
-          {organizations.length > 0 && <form className="settings-form" onSubmit={createSource}><label>Source name<input name="name" required minLength={2} maxLength={120} placeholder="Partner feed / Manual entry" /></label><label>Source type<select name="sourceType"><option value="manual">Manual entry</option><option value="approved_feed">Approved public feed</option><option value="partner_feed">Partner feed</option><option value="public_api">Public API</option></select></label><label>Source URL (HTTPS)<input name="sourceUrl" type="url" placeholder="https://source.example" /></label><label>Opt-out / compliance instructions<input name="optOutInstructions" maxLength={1000} placeholder="How to honor source-specific restrictions" /></label><button className="primary-button">Register source</button></form>}
+        <section className="panel settings-card" id="sources"><div className="panel-header"><div><h2>Approved listing sources</h2><p>Use manual records or a provider you are authorized to access. Live provider ingestion is currently RentCast US; the app does not scrape listing websites.</p></div></div>
+          {organizations.length > 0 && <form className="settings-form" onSubmit={createSource}>
+            <label>Source name<input name="name" required minLength={2} maxLength={120} placeholder={sourceType === "public_api" ? "RentCast - Austin TX" : "Partner feed / Manual entry"} /></label>
+            <label>Source type<select name="sourceType" value={sourceType} onChange={(event) => setSourceType(event.target.value)}><option value="manual">Manual entry</option><option value="approved_feed">Approved public feed</option><option value="partner_feed">Partner feed</option><option value="public_api">RentCast public API (US)</option></select></label>
+            {sourceType === "public_api" ? <>
+              <label>Listing category<select name="listingType"><option value="sale">For sale</option><option value="rental">Long-term rental</option></select></label>
+              <fieldset><legend>Search area</legend><label>ZIP code<input name="zipCode" inputMode="numeric" pattern="[0-9]{5}" maxLength={5} placeholder="78701" /></label><p>Enter either one 5-digit ZIP code or a city and state.</p><label>City<input name="city" minLength={2} maxLength={120} placeholder="Austin" /></label><label>State<input name="state" minLength={2} maxLength={2} pattern="[A-Za-z]{2}" placeholder="TX" /></label></fieldset>
+              <label>Maximum results per sync<input name="maxResults" type="number" min={1} max={100} defaultValue={50} /></label>
+              <p className="form-hint">RentCast access requires a server-side API key. New sources stay inactive until an owner/admin approves them; scheduled sync is limited to once per source every 24 hours.</p>
+            </> : <label>Source URL (HTTPS)<input name="sourceUrl" type="url" placeholder="https://source.example" /></label>}
+            <label>Opt-out / compliance instructions<input name="optOutInstructions" maxLength={1000} placeholder="How to honor source-specific restrictions" /></label>
+            <button className="primary-button">Register source</button>
+          </form>}
           {newToken && <div className="token-reveal"><b>Copy this source token now. It cannot be viewed again.</b><code>{newToken}</code><div className="token-actions"><button className="secondary-button small" onClick={() => void copySourceToken()}>Copy token</button><button className="text-button" onClick={() => setNewToken("")}>Hide token</button></div><small>Store it in your secrets manager and configure it as an Authorization: Bearer token for the ingestion endpoint.</small></div>}
-          {sources.length === 0 ? <div className="workspace-state compact">No registered sources yet.</div> : <div className="source-list">{sources.map((source) => <div className="connection-row" key={source.id}><span className="connection-logo supabase">↗</span><div><b>{source.name}</b><small>{source.source_type.replace("_", " ")}{source.source_url ? ` · ${new URL(source.source_url).hostname}` : ""} · {source.source_health?.last_success_at ? `last ingest ${new Date(source.source_health.last_success_at).toLocaleString()}` : "no successful ingestion yet"}{source.source_health?.message ? ` · ${source.source_health.message}` : ""}</small></div><StatusPill tone={source.approved && source.active ? "green" : "amber"}>{source.approved && source.active ? "Approved & active" : "Pending approval"}</StatusPill>{source.approved && source.active && source.source_type !== "manual" && source.source_health && <StatusPill tone={source.source_health.status === "healthy" ? "green" : source.source_health.status === "unknown" ? "neutral" : "amber"}>{source.source_health.status}</StatusPill>}{canApproveSources && source.source_type !== "manual" && <button className="secondary-button small" onClick={() => void decideSource(source, !(source.approved && source.active))}>{source.approved && source.active ? "Disable" : "Approve"}</button>}</div>)}</div>}
+          {sources.length === 0 ? <div className="workspace-state compact">No registered sources yet.</div> : <div className="source-list">{sources.map((source) => <div className="connection-row" key={source.id}><span className="connection-logo supabase">↗</span><div><b>{source.name}</b><small>{source.source_type === "public_api" ? `RentCast · ${source.configuration?.listingType ?? "listing"} · ${source.configuration?.zipCode ?? `${source.configuration?.city ?? ""}, ${source.configuration?.state ?? ""}`} · up to ${source.configuration?.maxResults ?? 50} results` : source.source_type.replace("_", " ")}{source.source_type !== "public_api" && source.source_url ? ` · ${new URL(source.source_url).hostname}` : ""} · {source.source_health?.last_success_at ? `last sync ${new Date(source.source_health.last_success_at).toLocaleString()}` : "no successful sync yet"}{source.source_health?.last_sync_attempt_at ? ` · attempted ${new Date(source.source_health.last_sync_attempt_at).toLocaleString()}` : ""}{source.source_health?.message ? ` · ${source.source_health.message}` : ""}</small></div><StatusPill tone={source.approved && source.active ? "green" : "amber"}>{source.approved && source.active ? "Approved & active" : "Pending approval"}</StatusPill>{source.approved && source.active && source.source_type !== "manual" && source.source_health && <StatusPill tone={source.source_health.status === "healthy" ? "green" : source.source_health.status === "unknown" ? "neutral" : "amber"}>{source.source_health.status}</StatusPill>}{canApproveSources && source.source_type !== "manual" && <button className="secondary-button small" onClick={() => void decideSource(source, !(source.approved && source.active))}>{source.approved && source.active ? "Disable" : "Approve"}</button>}</div>)}</div>}
         </section>
         <section className="panel settings-card" id="integrations"><div className="panel-header"><div><h2>Runtime configuration</h2><p>Configured environment values do not imply a live provider connection or successful health check.</p></div></div>
           <div className="connection-row"><span className="connection-logo supabase">S</span><div><b>Supabase Auth + Postgres</b><small>Primary data store and authentication provider</small></div><StatusPill tone={integrations.supabase ? "green" : "amber"}>{integrations.supabase ? "Configured" : "Missing"}</StatusPill></div>
           <div className="connection-row"><span className="connection-logo">🔐</span><div><b>Owner-detail encryption key</b><small>A 32-byte base64 key is required before private property or contact details can be stored.</small></div><StatusPill tone={integrations.ownerDataEncryption ? "green" : "amber"}>{integrations.ownerDataEncryption ? "Configured" : "Missing"}</StatusPill></div>
           <div className="connection-row"><span className="connection-logo supabase">↗</span><div><b>Source webhook ingestion</b><small>Source-scoped bearer tokens are validated server-side. Webhook payloads cannot submit private owner details.</small></div><StatusPill tone={integrations.ingestionServiceRole ? "green" : "amber"}>{integrations.ingestionServiceRole ? "Configured" : "Missing service role key"}</StatusPill></div>
+          <div className="connection-row"><span className="connection-logo supabase">R</span><div><b>RentCast listings (US)</b><small>Listing search API key; full address and listing-agent/office contacts are encrypted and only revealed through the existing approval flow.</small></div><StatusPill tone={integrations.rentcast ? "green" : "amber"}>{integrations.rentcast ? "API key configured" : "API key missing"}</StatusPill></div>
+          <div className="connection-row"><span className="connection-logo supabase">◷</span><div><b>Scheduled sync authentication</b><small>Required to authenticate RentCast sync and source-health jobs.</small></div><StatusPill tone={integrations.scheduledJobs ? "green" : "amber"}>{integrations.scheduledJobs ? "Configured" : "Missing CRON_SECRET"}</StatusPill></div>
           <div className="connection-row"><span className="connection-logo n8n">⌁</span><div><b>n8n workflow template</b><small>Inactive by default. Configure the template with the one-time source token and enable it only for an approved source.</small></div><StatusPill tone="neutral">Template only</StatusPill></div>
         </section>
       </div>
