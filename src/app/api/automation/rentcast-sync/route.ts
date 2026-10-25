@@ -180,7 +180,7 @@ export async function POST(request: Request) {
 
       const [{ data: profiles, error: profilesError }, { data: agents, error: agentsError }] = await Promise.all([
         supabase.from("agent_profiles")
-          .select("agent_id,service_areas,specialties,currency,min_budget,max_budget")
+          .select("agent_id,display_name,service_areas,specialties,currency,min_budget,max_budget")
           .eq("organization_id", source.organization_id),
         supabase.from("agents").select("id,active").eq("organization_id", source.organization_id).eq("active", true),
       ]);
