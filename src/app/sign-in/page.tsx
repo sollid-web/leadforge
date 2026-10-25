@@ -16,7 +16,7 @@ export default function SignInPage() {
     event.preventDefault();
     setMessage("");
     const supabase = getSupabaseBrowserClient();
-    if (!supabase) { setMessage("Demo mode is active. Configure Supabase to enable live sign-in."); return; }
+    if (!supabase) { setMessage("Supabase is not configured. Add the required environment variables to enable sign-in."); return; }
     setBusy(true);
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     setBusy(false);

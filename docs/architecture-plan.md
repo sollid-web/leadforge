@@ -1,109 +1,111 @@
-# LeadForge Architecture Plan
+# LeadForge architecture and implementation boundary
 
-## Entities & Relationships
+## Product boundary
 
-### Core Entities
-1. **Lead**
-   - Core record representing a potential real estate client
-   - Fields: id, firstName, lastName, email, phone, source, status, score, createdAt, updatedAt
-   - Relationships: belongs to one Agent (realtor), has many Activities, belongs to one Campaign
+LeadForge is a real-estate opportunity intake, scoring, and agent-routing MVP. It is not a property scraper, an owner-contact broker, a CRM replacement, or a bulk messaging system. The app accepts manually entered records and normalized summaries from sources an organization has approved. It does not fetch an arbitrary source URL.
 
-2. **Activity**
-   - Any interaction with a lead (call, email, SMS, meeting, note)
-   - Fields: id, leadId, type, subject, content, outcome, createdAt, updatedAt
-   - Relationships: belongs to one Lead, optional belongs to one Automation
+Private property and owner details are separate from opportunity summaries. The agent first receives only a summary. A matched agent explicitly requests access, a manager approves or rejects the request, and only the requesting agent can retrieve details after approval. No owner outreach is automatically generated or sent.
 
-3. **Automation (Workflow)**
-   - Rules-based automation for lead nurturing
-   - Fields: id, name, description, trigger, actions, isActive, createdAt, updatedAt
-   - Relationships: has many Activities, belongs to one Agent
+## Runtime components
 
-4. **Campaign**
-   - Grouping of leads for marketing/sales initiatives
-   - Fields: id, name, description, startDate, endDate, status, createdAt, updatedAt
-   - Relationships: has many Leads, belongs to one Agent
+```mermaid
+flowchart LR
+  U[Authenticated organization member] --> N[Next.js dashboard]
+  N --> R[Zod-validated route handlers]
+  R --> A[Supabase Auth + organization membership]
+  R --> D[(Postgres + RLS)]
+  S[Approved source] --> W[Source-scoped webhook]
+  W --> V[Token hash verification]
+  V --> P[Normalize / dedupe / score / snapshot]
+  P --> D
+  D --> M[Agent matching]
+  M --> I[Summary match]
+  I --> Q[Agent interest request]
+  Q --> H[Manager approval]
+  H --> K[Audited detail access]
+  K --> E[Server decrypts AES-GCM payload]
+```
 
-5. **Agent (User)**
-   - Real estate agent using the platform
-   - Fields: id, email, name, role, isActive, createdAt, updatedAt
-   - Relationships: has many Leads, has many Activities, has many Automations, has many Campaigns
+### Request boundaries
 
-6. **Integration**
-   - External system connections
-   - Fields: id, type (gmail, supabase, n8n, etc.), config, credentials (encrypted), createdAt, updatedAt
+- Browser traffic uses the Supabase SSR session and anon/publishable key; database RLS remains mandatory.
+- Authenticated app endpoints derive tenant scope from `organization_members`, not request payloads.
+- Webhook ingestion uses a high-entropy, per-source bearer token. Only the SHA-256 token hash is stored. The endpoint uses a server-only Supabase service-role key after validating that token and its source's approval/active status.
+- Public-feed webhook schemas omit private details. A source cannot submit full addresses, owner contacts, or arbitrary unvalidated columns through that route.
+- Private data entered in the manager UI is encrypted in the server process using AES-256-GCM before insert. The encryption key is never passed to the browser or database.
 
-### Authentication Approach
-- **Provider**: Supabase Auth (email/password + OAuth providers)
-- **Strategy**: JWT-based session management with httpOnly cookies
-- **Security Boundaries**:
-  - Public routes: /api/health, /login, /callback
-  - Protected routes: /dashboard/* (all require authentication)
-  - API routes: Row-level security via Supabase policies
-  - Role-based access: Agent/Admin roles for feature gating
+## Data model
 
-### Security Boundaries
-1. **Network Layer**
-   - Vercel Edge Functions / Serverless Functions
-   - Rate limiting on auth and API endpoints
-   - CORS restricted to frontend origin
+Migration `202610180001_leadforge_core.sql` contains the original organization membership, inbound buyer-lead, follow-up, scoring-detail, and audit foundation. Migration `202610250001_opportunity_workflows.sql` adds the opportunity model:
 
-2. **Data Layer**
-   - Supabase Postgres with Row Level Security (RLS)
-   - Encryption at rest for PII (email, phone)
-   - Field-level encryption for sensitive data (SSN, financial info if collected)
-   - API credentials stored encrypted in database
+| Table | Purpose |
+| --- | --- |
+| `organizations` | Tenant root, created through the authenticated organization bootstrap function |
+| `users` | Auth user profile fields |
+| `organization_members` | Existing membership and role boundary |
+| `agents` | Organization-linked member identity and active state |
+| `agent_profiles` | Areas, specialties, currency, and budget range used for matching |
+| `agent_preferences` | Agent-level notification and opt-out preferences |
+| `teams` | Organization team grouping |
+| `listing_sources` | Source type, HTTPS location, review state, and source-token hash |
+| `source_snapshots` | Fingerprint and minimized, non-private listing metadata |
+| `source_health` | Last successful ingestion and consecutive failure state |
+| `listings` | Canonical, privacy-safe opportunity summary, market fields, lifecycle, and dedupe key |
+| `owners` | Listing owner verification state without plaintext owner identity |
+| `owner_contacts` | Encrypted contact payload, permission state, and opt-out timestamp |
+| `listing_private_details` | AES-GCM ciphertext, IV, authentication tag, and key version for address/owner detail |
+| `listing_verifications` | Human review state and evidence reference |
+| `listing_scores` | Versioned trust, owner-led, urgency, quality, and explainable factors |
+| `matches` | Ranked listing-to-agent fit with reasons |
+| `interest_requests` | Explicit agent request and decision state |
+| `approvals` | Reviewer, decision, reason, and revocation state |
+| `outreach_messages` | Summary-only message lifecycle scaffolding; no email dispatch route is enabled |
+| `campaigns` | Minimal organization campaign grouping |
+| `subscriptions` | Billing provider identifiers and plan state; no payment integration is enabled |
+| `audit_logs` | Organization-scoped event trail for decisions, ingestion, suppression, and detail release |
 
-3. **Application Layer**
-   - Input validation via Zod schemas
-   - Output encoding to prevent XSS
-   - CSRF protection on state-changing operations
-   - Dependency scanning and updates
+Legacy `leads` records represent inbound buyer enquiries; they are not property opportunities. The `/api/leads` handler is retained for that schema and no longer returns demo data. The opportunity experience uses `/api/listings`.
 
-### Integration Points
+## Ingestion and scoring
 
-#### Supabase
-- **Database**: Primary relational data store for leads, activities, automations
-- **Auth**: User authentication and session management
-- **Storage**: File uploads (documents, images) - optional for future
-- **Realtime**: Live updates for lead activity feeds
-- **Functions**: Edge functions for webhook handling and complex operations
+`src/lib/opportunities.ts` owns canonical input validation, normalization, dedupe-key construction, explainable listing scoring, and agent fit scoring. API routes:
 
-#### n8n
-- **Workflow Engine**: Complex multi-step automations beyond simple rules
-- **Triggers**: Webhook receiver for external events (form submissions, lead source updates)
-- **Actions**: 
-  - Send emails via Gmail/SMTP
-  - Update CRM systems
-  - Trigger SMS/WhatsApp messages
-  - Enrich lead data via APIs
-- **Deployment**: n8n workflow exports stored in `/src/n8n` as JSON
-- **Communication**: 
-  - LeadForge → n8n: HTTP API calls to trigger workflows
-  - n8n → LeadForge: Webhooks to update lead status/activities
+- enforce membership/role or source-token authorization;
+- derive organization scope from the authenticated membership or matched source record;
+- normalize and limit supported fields;
+- check organization-level duplicates before insert;
+- save only a minimized snapshot and scoring factors;
+- record source success and an audit event.
 
-#### AI Provider (Vercel AI Gateway)
-- **Lead Scoring**: Predictive lead quality scoring
-- **Content Generation**: AI-generated follow-up messages/email templates
-- **Intent Analysis**: Classification of lead inquiries and responses
-- **Data Enrichment**: Suggested next-best-actions based on lead behavior
-- **Privacy**: Zero data retention via AI Gateway; no PII stored/logged
+The source-health record is updated by a successful ingestion; there is no scheduled remote source probe or autonomous crawler. External adapters must be legally approved and normalize to the documented Zod shape before posting.
 
-#### Gmail Integration
-- **Sync**: Two-way email sync for lead communications
-- **Tracking**: Email open/click tracking (future)
-- **Templates**: Saved email templates for common follow-ups
-- **Scheduling**: Send-later and scheduled email campaigns
+Listing scoring is deterministic and versioned. It combines source quality, owner-listed claim (not owner verification), record completeness, and recency. Agent matching ranks only active agents using city/region, property specialty, and compatible budget/currency. A score is a triage aid, not a verified valuation, ownership claim, or legal judgment.
 
-### Technology Stack
-- **Frontend**: Next.js 15 (App Router), TypeScript, Tailwind CSS
-- **Backend**: Next.js API Routes, Supabase (Postgres + Auth)
-- **Automation**: n8n (self-hosted or managed)
-- **AI**: Vercel AI Gateway for multi-provider access
-- **Deployment**: Vercel (frontend + API routes)
-- **Dev**: pnpm, ESLint, TypeScript strict mode
+## Approval and privacy sequence
 
-### Future Considerations
-- **Multi-tenancy**: Separate workspaces for real estate teams/brokerages
-- **Analytics**: Lead conversion funnel tracking, ROI reporting
-- **Mobile**: PWA capabilities for offline lead capture
-- **Compliance**: TCPA/GDPR readiness for communications
+1. A manager stores optional private details as authenticated-app input. The server encrypts them and stores only ciphertext/nonce/tag. Contact permission defaults to `unknown`.
+2. A manager may verify an owner-listed claim against a reference and rationale. Verification alone never grants detail access.
+3. The manager computes matches; matching output and any in-app notice contain only listing summaries.
+4. A matched agent may create one explicit interest request for that match.
+5. A manager must approve or reject with a reason. RLS requires the request and a corresponding approved approval.
+6. The detail handler verifies the signed-in active agent is the matched agent, checks interest plus approval, checks suppression, decrypts on the server, and writes an audit event before returning the response.
+7. Suppression prevents future detail reads and revokes related approval state. A verified owner opt-out also marks contact permission as opted out.
+
+RLS protects direct table access as well as application routes. Private data tables store ciphertext; only the server has the decryption key. Service-role access is restricted to the source-token endpoint and must remain server-only.
+
+## Background workflows
+
+`n8n/workflows/lead-discovery-and-ingestion.json` is an inactive template. It is designed to receive a controlled source payload, reject private fields, and forward a public summary using a source-scoped bearer token. It does not fetch or scrape sites. The application does not report the workflow as connected or healthy.
+
+Automated scoring/matching runs as route-level server logic. Reminders, source polling, CRM synchronization, email delivery, and retries are not implemented.
+
+## Known architecture gaps
+
+- No automated database integration tests or organization-switching UI.
+- No managed agent invitations or full team administration UX.
+- No real third-party feed adapter, scheduler, source probing, or adapter-level throttling.
+- No transaction/RPC boundary spanning every ingestion side effect; API returns explicit processing errors, but an operator may need to inspect partially written records.
+- No encryption key rotation/re-encryption tool.
+- No rate limiting, payment integration, or production monitoring.
+
+These are explicit remaining work, not represented as completed integrations.

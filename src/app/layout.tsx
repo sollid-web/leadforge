@@ -14,8 +14,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "LeadForge | Real Estate Lead Intelligence",
-  description:
-    "LeadForge is an AI-powered real estate lead intelligence and follow-up platform.",
+  description: "Discover and route real-estate opportunities with transparent scoring and approval-gated detail access.",
 };
 
 export default function RootLayout({
