@@ -87,7 +87,7 @@ Generate an encryption key with `openssl rand -base64 32`. Never use a real key 
 
 For security boundaries, limitations, and vulnerability reporting, see [`SECURITY.md`](./SECURITY.md). For the schema and request lifecycle see [`docs/architecture-plan.md`](./docs/architecture-plan.md).
 
-## API overview
+### API overview
 
 | Route | Purpose |
 | --- | --- |
