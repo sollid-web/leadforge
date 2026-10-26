@@ -2,22 +2,23 @@
 
 LeadForge is an early-stage owner-seller lead discovery and agent-routing MVP. The core business goal is to find properties actually offered by owners, retain an actionable seller contact, and route that opportunity to agents. It supports owner-seller lead intake from authorized sources plus approved-source ingestion, including RentCast searches for US listings. RentCast results are ordinary listing records: any contacts it returns are listing-agent/office contacts, not proof of an owner-posted listing or owner contacts.
 
-The product is intentionally not a scraper or bulk messaging tool. Agents receive summary-only opportunities, and private property or owner details remain encrypted and inaccessible until an agent requests access and an organization manager explicitly approves that request. The matched agent's detail access is audited. Separately, managers can compose a one-to-one property inquiry to a listing agent, office, or verified owner only after recording permission or an applicable lawful basis and confirming each send; this is never automatic.
+The product does not scrape property listing websites or send bulk messaging. Its separate **Business prospects** workspace searches OpenStreetMap's public real-estate business records by area, then saves the mapped businesses into a review pipeline with stages and internal notes. Managers can compose and send an individually reviewed introduction to a listed business email; every message includes an opt-out link. Contact details may be absent, coverage varies, and a map listing does not mean the business asked to be contacted or wants to buy leads. Agents receive summary-only opportunities, and private property or owner details remain encrypted and inaccessible until an agent requests access and an organization manager explicitly approves that request.
 
-**Project status:** working MVP foundation, not a complete or production-certified SaaS. Owner-seller leads can be recorded from authorized sources with an evidence link and seller contact, then manager-verified and approval-gated. RentCast does not provide reliable owner-posted classification or owner contact discovery. One verified seller lead is free per organization; later verified leads cost $25 USD through Stripe Checkout. Automated owner-seller discovery, billing refunds, and subscription management are not implemented. Coverage depends on the provider and search area; this is not a global MLS connection. No sample records are used as operational data.
+**Project status:** working MVP foundation, not a complete or production-certified SaaS. Business prospect discovery uses OpenStreetMap and is distinct from owner-seller lead ingestion. Owner-seller leads can be recorded from authorized sources with an evidence link and seller contact, then manager-verified and approval-gated. RentCast does not provide reliable owner-posted classification or owner contact discovery. One verified seller lead is free per organization; later verified leads cost $25 USD through Stripe Checkout. Automated owner-seller discovery, billing refunds, and subscription management are not implemented. Coverage depends on the data provider and search area; this is not a global MLS connection. No sample records are used as operational data.
 
 ## Current product flows
 
 1. An authenticated user creates an organization from **Settings**. The creator becomes its owner.
-2. A manager manually records an opportunity, registers a webhook source, or configures a RentCast search by ZIP code or city/state.
-3. External sources stay inactive until an owner/admin approves them. An authenticated daily RentCast sync fetches up to 100 US sale or long-term rental listings from one configured search per job; each source is subject to a 24-hour lock.
-4. Managers can add owner-seller leads from authorized sources with the original listing/evidence URL and at least one seller email or phone. Contacts are encrypted, and verification requires a saved seller contact and manager-reviewed evidence.
-5. LeadForge normalizes and deduplicates provider records, stores sanitized snapshots, calculates explainable scores, encrypts listing-agent/office contacts and full addresses, and records source health and audit events.
-6. New listings are automatically ranked against active agent profiles; matching summaries are available in-app. Agents can explicitly request details.
-7. A manager approves or rejects each request with a reason. The first verified owner-seller unlock is free per organization; later approved owner-seller leads require a $25 USD Stripe payment before any private contact is revealed.
-8. A detail response is decrypted on the server and emitted with `Cache-Control: private, no-store`; the reveal is audit logged. Supabase RLS enforces the paid/sample entitlement as well as manager approval. Suppression blocks later reveals and revokes related approvals.
+2. A manager can search the **Business prospects** workspace for real-estate agents, brokerages, or property managers near a city/region. Results are saved by OpenStreetMap record ID, deduplicated, and organized with review stages and internal notes.
+3. A manager manually records an opportunity, registers a webhook source, or configures a RentCast search by ZIP code or city/state.
+4. External listing sources stay inactive until an owner/admin approves them. An authenticated daily RentCast sync fetches up to 100 US sale or long-term rental listings from one configured search per job; each source is subject to a 24-hour lock.
+5. Managers can add owner-seller leads from authorized sources with the original listing/evidence URL and at least one seller email or phone. Contacts are encrypted, and verification requires a saved seller contact and manager-reviewed evidence.
+6. LeadForge normalizes and deduplicates provider records, stores sanitized snapshots, calculates explainable scores, encrypts listing-agent/office contacts and full addresses, and records source health and audit events.
+7. New listings are automatically ranked against active agent profiles; matching summaries are available in-app. Agents can explicitly request details.
+8. A manager approves or rejects each request with a reason. The first verified owner-seller unlock is free per organization; later approved owner-seller leads require a $25 USD Stripe payment before any private contact is revealed.
+9. A detail response is decrypted on the server and emitted with `Cache-Control: private, no-store`; the reveal is audit logged. Supabase RLS enforces the paid/sample entitlement as well as manager approval. Suppression blocks later reveals and revokes related approvals.
 
-Matched-agent summary email is a separate feature: it is sent only after an agent opts in and a manager confirms each message. For listing contacts, managers can compose and manually send a one-to-one property inquiry only after recording permission or an applicable lawful basis with an evidence reference; owner outreach additionally requires a verified owner. Each message carries an opt-out link, opt-outs are recorded, repeat sends are rate-limited, and no campaigns, bulk sends, or automatic contact emails run. These controls do not determine whether a particular outreach is lawful; teams must assess applicable law and source-provider terms before sending. Resend must be configured. Arbitrary website scraping, global MLS access, and AI scoring are not implemented. The n8n export is a disabled webhook orchestration template.
+Matched-agent summary email is a separate feature: it is sent only after an agent opts in and a manager confirms each message. For listing contacts, managers can compose and manually send a one-to-one property inquiry only after recording permission or an applicable lawful basis with an evidence reference; owner outreach additionally requires a verified owner. Business prospect emails are individually composed/reviewed and explicitly confirmed; they are limited to one per prospect per 30 days and 20 per workspace per day, with address-level opt-outs honored. No bulk send or automatic contact email runs. These controls do not determine whether a particular outreach is lawful; teams must assess applicable law and source-provider terms before sending. Resend must be configured. Automated customer outreach, invitations, AI messaging, arbitrary website scraping, global MLS access, and AI scoring are not implemented. The n8n export is a disabled webhook orchestration template.
 
 ## Stack
 
@@ -38,7 +39,7 @@ cp .env.example .env.local
 pnpm dev
 ```
 
-Apply the ordered SQL migrations to a new Supabase project using the SQL editor or Supabase CLI. Migration `202610250002` grants API-role table privileges; later migrations add RentCast source configuration, manager-only contact inquiries, and verified-lead purchase entitlements. Row-level security still restricts which records each user can access:
+Apply the ordered SQL migrations to a new Supabase project using the SQL editor or Supabase CLI. Migration `202610250002` grants API-role table privileges; later migrations add RentCast source configuration, manager-only contact inquiries, verified-lead purchase entitlements, and business-prospect discovery. Row-level security still restricts which records each user can access:
 
 ```bash
 supabase login
@@ -65,6 +66,7 @@ See [`.env.example`](./.env.example). Required for the core application:
 | `RENTCAST_API_KEY` | Optional server-only RentCast API credential for US listing discovery |
 | `STRIPE_SECRET_KEY` | Optional server-only Stripe secret key for $25 one-time verified-lead checkout |
 | `STRIPE_WEBHOOK_SECRET` | Optional server-only signing secret for `/api/stripe/webhook` |
+| `OPENSTREETMAP_CONTACT_EMAIL` | Optional monitored contact included in OpenStreetMap Nominatim requests |
 
 Generate an encryption key with `openssl rand -base64 32`. Never use real credentials in a committed file. Keep `SUPABASE_SERVICE_ROLE_KEY`, `OWNER_DATA_ENCRYPTION_KEY`, `RESEND_API_KEY`, `RENTCAST_API_KEY`, `CRON_SECRET`, `STRIPE_SECRET_KEY`, and `STRIPE_WEBHOOK_SECRET` in deployment secret storage; none belongs in a `NEXT_PUBLIC_` variable. Losing the encryption key makes encrypted private details unrecoverable. Key rotation is an operational procedure and is not automated by this MVP.
 
@@ -97,6 +99,10 @@ For security boundaries, limitations, and vulnerability reporting, see [`SECURIT
 | Route | Purpose |
 | --- | --- |
 | `GET/POST /api/organizations` | List memberships / bootstrap an organization |
+| `GET/POST /api/business-prospects` | List saved business prospects / discover and save OpenStreetMap businesses |
+| `PATCH /api/business-prospects/:id` | Update prospect review stage or internal notes |
+| `POST /api/business-prospects/:id/email` | Manager-reviewed individual business introduction via Resend |
+| `GET/POST /api/business-prospects/opt-out` | Confirm an email recipient's business-email opt-out |
 | `GET/POST /api/sources` | List or register sources |
 | `POST /api/sources/:id/approval` | Owner/admin activates or disables a source |
 | `GET/POST /api/listings` | List summaries / manager manual ingestion |

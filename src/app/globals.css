@@ -232,6 +232,43 @@ td small { display: block; margin-top: 4px; color: #929e97; font-size: 9px; }
 .settings-form legend { padding: 0 4px; color: #58685f; font-size: 10px; }
 .source-list { margin-top: 10px; }
 .source-list .connection-row > div { flex: 1; }
+.prospect-search-panel, .prospects-panel { margin-bottom: 17px; padding: 17px; }
+.prospect-search-form { display: grid; grid-template-columns: minmax(220px, 1.5fr) minmax(160px, 1fr) minmax(115px, .6fr) auto; align-items: end; gap: 11px; margin-top: 16px; }
+.prospect-search-form label, .prospect-notes-label, .prospect-stage-label { display: grid; gap: 6px; color: #53645a; font-size: 10px; font-weight: 600; }
+.prospect-search-form input, .prospect-search-form select, .prospect-filter, .prospect-stage-label select, .prospect-notes-label textarea { min-width: 0; border: 1px solid #dfe7e2; border-radius: 7px; background: white; outline: 0; padding: 9px 10px; font-size: 11px; }
+.prospect-search-form input:focus, .prospect-search-form select:focus, .prospect-filter:focus, .prospect-stage-label select:focus, .prospect-notes-label textarea:focus { border-color: #8db9a0; box-shadow: 0 0 0 3px rgb(66 133 93 / 10%); }
+.prospect-search-form > button { white-space: nowrap; }
+.prospect-attribution { margin: 12px 0 0; color: #849189; font-size: 9px; line-height: 1.5; }
+.prospect-attribution a { color: #39765c; text-decoration: underline; }
+.prospect-metrics .metric-card { min-height: 103px; }
+.prospect-metrics .metric-value { display: block; }
+.prospect-filter { padding: 8px 10px; color: #5c6b63; }
+.prospect-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px; margin-top: 14px; }
+.prospect-card { min-width: 0; border: 1px solid #e7ede9; border-radius: 9px; background: #fcfdfc; padding: 13px; }
+.prospect-card-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.prospect-card-heading h3 { margin: 0; color: #2b3e33; font-size: 12px; font-weight: 650; }
+.prospect-card-heading p, .prospect-address { margin: 5px 0 0; color: #829087; font-size: 9px; line-height: 1.5; }
+.prospect-contact { display: flex; flex-wrap: wrap; gap: 7px 12px; margin: 11px 0; font-size: 10px; overflow-wrap: anywhere; }
+.prospect-contact a { color: #347455; }
+.prospect-contact span { color: #9aa49e; }
+.prospect-email-actions { display: flex; align-items: center; gap: 9px; }
+.prospect-email-actions small { color: #8a9790; font-size: 9px; }
+.prospect-notes-label { margin-top: 10px; }
+.prospect-notes-label textarea { resize: vertical; color: #516158; font-weight: 400; line-height: 1.45; }
+.prospect-card-footer { display: flex; align-items: center; justify-content: space-between; gap: 9px; margin-top: 10px; }
+.prospect-card-footer > a { white-space: nowrap; }
+.prospect-stage-label { grid-template-columns: auto minmax(95px, 1fr); align-items: center; }
+.prospect-stage-label select { padding: 6px 8px; }
+.modal-backdrop { position: fixed; inset: 0; z-index: 20; display: grid; place-items: center; overflow-y: auto; background: rgb(23 41 35 / 46%); padding: 20px; }
+.prospect-email-modal { width: min(100%, 620px); padding: 18px; box-shadow: 0 20px 65px rgb(20 38 28 / 22%); }
+.prospect-email-form { display: grid; gap: 12px; margin-top: 16px; }
+.prospect-email-form > label:not(.checkbox-label) { display: grid; gap: 6px; color: #53645a; font-size: 10px; font-weight: 600; }
+.prospect-email-form input:not([type="checkbox"]), .prospect-email-form textarea { width: 100%; border: 1px solid #dfe7e2; border-radius: 7px; background: white; outline: 0; padding: 9px 10px; font-size: 11px; font-weight: 400; }
+.prospect-email-form textarea { resize: vertical; line-height: 1.55; }
+.prospect-email-form input:focus, .prospect-email-form textarea:focus { border-color: #8db9a0; box-shadow: 0 0 0 3px rgb(66 133 93 / 10%); }
+.prospect-email-hint { margin: 0; color: #849189; font-size: 9px; line-height: 1.5; }
+.prospect-review-confirm { align-items: flex-start; }
+.prospect-email-buttons { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
 .automation-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 18px 0; }
 .automation-summary > div { display: grid; gap: 5px; border: 1px solid var(--line); border-radius: 9px; background: white; padding: 14px; color: #849189; font-size: 10px; }
 .summary-number { color: #526b5b; font-size: 16px; font-weight: 650; }
@@ -315,6 +352,11 @@ td small { display: block; margin-top: 4px; color: #929e97; font-size: 9px; }
   .source-list .connection-row { flex-wrap: wrap; }
   .source-list .connection-row > .status-pill { margin-left: auto; }
   .automation-summary { grid-template-columns: 1fr; }
+  .prospect-search-form, .prospect-list { grid-template-columns: 1fr; }
+  .prospect-search-form > button { justify-self: start; }
+  .prospect-card-footer { align-items: flex-start; flex-direction: column; }
+  .modal-backdrop { align-items: start; padding: 10px; }
+  .prospect-email-modal { padding: 13px; }
   .workflow-detail { gap: 9px; padding: 12px; }
   .workflow-meta { display: grid; gap: 6px; }
   .workflow-title { align-items: flex-start; flex-direction: column; gap: 6px; }

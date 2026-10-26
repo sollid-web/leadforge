@@ -6,6 +6,7 @@ import { useEffect, useState, type ReactNode } from "react";
 
 const nav = [
   { href: "/dashboard", label: "Overview", icon: "◈" },
+  { href: "/dashboard/prospects", label: "Business prospects", icon: "⌕" },
   { href: "/dashboard/leads", label: "Opportunities", icon: "◎" },
   { href: "/dashboard/follow-ups", label: "Interest review", icon: "↗" },
   { href: "/dashboard/automations", label: "Automations", icon: "⌁" },

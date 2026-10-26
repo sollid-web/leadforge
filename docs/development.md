@@ -32,7 +32,7 @@ supabase link --project-ref YOUR_PROJECT_REF
 supabase db push
 ```
 
-Alternatively, run the files under [`supabase/migrations`](../supabase/migrations/) in timestamp order in the Supabase SQL editor. The first migration contains the current organization and legacy inbound-lead tables; the second adds the opportunity workflow and RLS rules; the third grants API-role table privileges; the fourth adds RentCast search configuration and safe sync claiming; later migrations add manager-confirmed contact inquiries and verified-lead purchase entitlements.
+Alternatively, run the files under [`supabase/migrations`](../supabase/migrations/) in timestamp order in the Supabase SQL editor. The first migration contains the current organization and legacy inbound-lead tables; the second adds the opportunity workflow and RLS rules; the third grants API-role table privileges; later migrations add RentCast search configuration, manager-confirmed contact inquiries, verified-lead purchases, and the business-prospect pipeline.
 
 With a running local Supabase stack, apply pending migration files with:
 
@@ -47,6 +47,16 @@ pnpm dev
 ```
 
 Create an account at `/sign-up`, confirm it if required by Supabase Auth, and sign in. Use **Settings** to create the organization, save an agent profile, and register sources. Manual sources are enabled on registration. External sources remain disabled until an organization owner/admin verifies permission and explicitly enables them.
+
+## Business prospect discovery
+
+Open **Business prospects** and search a city, region, or country for real-estate agents, brokerages, or property-management companies. The app geocodes the submitted area with Nominatim and searches nearby OpenStreetMap records through Overpass. Results are deduplicated per organization by OpenStreetMap object ID and organized into review stages with internal notes. Only manager-level workspace members can search or edit the prospect pipeline. Searches are limited to one per workspace every 30 seconds, and a shared database throttle respects the public Nominatim service's one-request-per-second policy.
+
+This uses community-mapped business records, not a verified agent directory. Coverage and listed business contact details vary by location and may be missing or stale. Results do not mean a business opted in or has interest in purchasing leads; the workflow does not automatically contact prospects. Data is attributed to [OpenStreetMap contributors](https://www.openstreetmap.org/copyright) and subject to the [Open Database License](https://opendatacommons.org/licenses/odbl/). Review those terms before exporting or redistributing prospect data. For Nominatim client identification, configure `OPENSTREETMAP_CONTACT_EMAIL` with a monitored application contact address. No external API key is required.
+
+## Business prospect email
+
+Configure `RESEND_API_KEY`, a verified `RESEND_FROM_EMAIL`, and `NEXT_PUBLIC_APP_URL` before sending. From a prospect card with a listed email, choose **Compose business email**, review/edit the individual message and recipient, tick the confirmation, then confirm the send. Messages are sent through Resend, recorded with the manager, and include an opt-out link. Address-level opt-outs are honored across the workspace. The application enforces one message per prospect per 30 days and a maximum of 20 prospect emails per workspace per 24 hours. Failed provider attempts are recorded; inspect the delivery/audit state before retrying. There is no bulk sender or AI auto-send.
 
 ## RentCast scheduled discovery
 
