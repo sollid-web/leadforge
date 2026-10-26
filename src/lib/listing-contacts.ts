@@ -1,7 +1,6 @@
-import { createHash } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { contactFingerprint } from "@/lib/contact-identity";
 import { encryptPrivateData } from "@/lib/private-data";
-import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
 type ContactInput = {
   name?: string;
@@ -19,13 +18,6 @@ type ListingContactInput = {
   contact: ContactInput;
   provenance: "publicly_listed" | "provider_supplied" | "unverified";
 };
-
-function contactFingerprint(contactType: ListingContactInput["contactType"], contact: ContactInput) {
-  const email = contact.email?.trim().toLocaleLowerCase("en");
-  const phone = contact.phone?.replace(/[^\d+]/g, "");
-  const identity = [email ? `email:${email}` : "", phone ? `phone:${phone}` : ""].filter(Boolean).join("|");
-  return identity ? createHash("sha256").update(`${contactType}:${identity}`).digest("hex") : null;
-}
 
 export async function storeListingContact(supabase: SupabaseClient, input: ListingContactInput) {
   const contactFingerprintValue = contactFingerprint(input.contactType, input.contact);
@@ -48,20 +40,9 @@ export async function storeListingContact(supabase: SupabaseClient, input: Listi
     updated_at: new Date().toISOString(),
   };
 
-  const { data: existing, error: lookupError } = await supabase.from("listing_contacts")
-    .select("id,collected_at")
-    .eq("listing_id", input.listingId)
-    .eq("contact_fingerprint", contactFingerprintValue)
-    .maybeSingle();
-  if (lookupError) return { error: lookupError };
-  if (existing) {
-    const { error } = await supabase.from("listing_contacts").update(record)
-      .eq("id", existing.id).eq("organization_id", input.organizationId);
-    if (error) return { error };
-  } else {
-    const { error } = await supabase.from("listing_contacts").insert(record);
-    if (error) return { error };
-  }
+  const { error: contactError } = await supabase.from("listing_contacts")
+    .upsert(record, { onConflict: "listing_id,contact_fingerprint" });
+  if (contactError) return { error: contactError };
 
   if (input.provenance === "publicly_listed") {
     const { error } = await supabase.from("listings")
@@ -80,6 +61,7 @@ export async function storeListingContact(supabase: SupabaseClient, input: Listi
 }
 
 export async function storeSubmittedContacts(input: {
+  supabase: SupabaseClient;
   organizationId: string;
   listingId: string;
   sourceId: string;
@@ -87,8 +69,6 @@ export async function storeSubmittedContacts(input: {
   publicContactContext?: string;
   privateDetails: Record<string, string | undefined>;
 }) {
-  const supabase = getSupabaseAdminClient();
-  if (!supabase) return { error: new Error("Server-side contact storage is not configured") };
   const groups: Array<{
     contactType: ListingContactInput["contactType"];
     contact: ContactInput;
@@ -120,7 +100,7 @@ export async function storeSubmittedContacts(input: {
   ];
   for (const group of groups) {
     if (!group.contact.name && !group.contact.email && !group.contact.phone) continue;
-    const result = await storeListingContact(supabase, {
+    const result = await storeListingContact(input.supabase, {
       organizationId: input.organizationId,
       listingId: input.listingId,
       sourceId: input.sourceId,

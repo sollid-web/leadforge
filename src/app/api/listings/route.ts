@@ -74,7 +74,7 @@ export async function GET(request: Request) {
   if (values.publishedAfter) query = query.gte("published_at", values.publishedAfter);
   if (values.updatedAfter) query = query.gte("listing_updated_at", values.updatedAfter);
   if (values.posterType?.length) query = query.in("poster_type", values.posterType);
-  else query = query.neq("poster_type", "AGENT");
+  else query = query.in("poster_type", ["OWNER_VERIFIED", "OWNER_UNVERIFIED"]);
   if (values.hasContact === "true") query = query.eq("has_public_contact", true);
   if (values.hasContact === "false") query = query.eq("has_contact_information", false);
   if (values.sourceId) query = query.eq("source_id", values.sourceId);
@@ -193,12 +193,25 @@ export async function POST(request: Request) {
       .eq("organization_id", member.organization_id);
     return lastSeenError;
   };
-  const { data: existing, error: duplicateError } = await supabase
-    .from("listings")
-    .select("id")
-    .eq("organization_id", member.organization_id)
-    .eq("dedupe_key", normalized.dedupeKey)
-    .maybeSingle();
+  const { data: sourceIdentity, error: sourceIdentityError } = normalized.externalId
+    ? await supabase.from("listing_source_links")
+      .select("listing_id")
+      .eq("source_id", source.id)
+      .eq("external_id", normalized.externalId)
+      .maybeSingle()
+    : { data: null, error: null };
+  if (sourceIdentityError) return NextResponse.json({ error: "Unable to check source listing identity" }, { status: 500 });
+  const { data: existing, error: duplicateError } = sourceIdentity
+    ? await supabase.from("listings").select("id")
+      .eq("id", sourceIdentity.listing_id)
+      .eq("organization_id", member.organization_id)
+      .maybeSingle()
+    : await supabase
+      .from("listings")
+      .select("id")
+      .eq("organization_id", member.organization_id)
+      .eq("dedupe_key", normalized.dedupeKey)
+      .maybeSingle();
   if (duplicateError) return NextResponse.json({ error: "Unable to check for duplicate opportunities" }, { status: 500 });
   const recordDuplicate = async (listingId: string) => {
     const sourceLinkError = await recordSourceLink(listingId);
@@ -368,6 +381,7 @@ export async function POST(request: Request) {
         if (contactError) return NextResponse.json({ error: "Private details stored but encrypted owner contact could not be created" }, { status: 500 });
       }
       const contacts = await storeSubmittedContacts({
+        supabase,
         organizationId: member.organization_id,
         listingId: listing.id,
         sourceId: source.id,

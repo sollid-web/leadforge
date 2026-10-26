@@ -32,7 +32,7 @@ supabase link --project-ref YOUR_PROJECT_REF
 supabase db push
 ```
 
-Alternatively, run the files under [`supabase/migrations`](../supabase/migrations/) in timestamp order in the Supabase SQL editor. The first migration contains the current organization and legacy inbound-lead tables; the second adds the opportunity workflow and RLS rules; the third grants API-role table privileges; later migrations add RentCast search configuration, manager-confirmed contact inquiries, verified-lead purchases, and the business-prospect pipeline.
+Alternatively, run the files under [`supabase/migrations`](../supabase/migrations/) in timestamp order in the Supabase SQL editor. The first migration contains the current organization and legacy inbound-lead tables; the second adds the opportunity workflow and RLS rules; the third grants API-role table privileges; later migrations add RentCast search configuration, manager-confirmed contact inquiries, verified-lead purchases, the business-prospect pipeline, and owner-direct listing/source/contact provenance (`202610260006`).
 
 With a running local Supabase stack, apply pending migration files with:
 
@@ -80,6 +80,14 @@ An owner-seller lead must include its original listing/evidence URL and at least
 
 After an agent requests a verified owner-seller lead and a manager approves it, the organization receives one free sample unlock. Further approved leads cost **$25 USD each**. Checkout uses Stripe Checkout; set `STRIPE_SECRET_KEY`, then configure a Stripe webhook pointing to `/api/stripe/webhook` with `checkout.session.completed` and `checkout.session.expired` events and set its signing secret as `STRIPE_WEBHOOK_SECRET`. For local tests, use Stripe test keys and `stripe listen --forward-to localhost:3000/api/stripe/webhook`. A signed `checkout.session.completed` event is required to unlock the paid contact; redirecting back from Checkout alone does not grant access. Test with a non-production workspace and Stripe test mode before setting live keys. Refunds, subscriptions, and seller payouts are not implemented.
 
+## Owner-direct listing ingestion and CSV
+
+Apply migration `202610260006_owner_direct_discovery.sql` before deploying the expanded opportunity workspace. The migration adds listing-type and recency fields, poster classification/evidence, source relationships, encrypted contact provenance, review history, and collection-run records. The dashboard defaults to excluding records classified as `AGENT`; this classification depends on source evidence and is not inferred from an owner claim. Owner verification is a manager-only review requiring a method, evidence reference, and rationale, and is recorded in both verification and poster-review history.
+
+Use **Import authorized CSV** for an owner-submitted or otherwise permitted dataset. Uploads are bounded to 2 MB and 100 rows. Required headers are `title,property_type,area,city,country_code`; optional headers include `source_name,source_url,external_id,description,listing_type,region,price,currency,bedrooms,bathrooms,published_at,listing_updated_at,poster_type,poster_evidence,poster_method,public_contact_context,address,owner_name,owner_email,owner_phone,listing_agent_name,listing_agent_email,listing_agent_phone`. `poster_type` cannot assert `OWNER_VERIFIED`; public contact context must refer to the source listing and does not establish permission for outreach. Each row is sent through authenticated server-side validation and receives normal deduplication and source attribution. Failed rows are reported individually. The CSV importer is a transfer path, not a provider or source of live discoveries.
+
+The RentCast adapter is limited to US listings. It preserves provider-supplied agent/office contacts as such and does not verify owner identity or supply owner contacts. No Nigeria owner-direct feed is currently connected or tested. Use owner-submitted records or an authorized dataset there; do not scrape sites or bypass source restrictions.
+
 ## Safe source testing
 
 1. Use a test Supabase project and a source you control or are approved to process.
@@ -111,8 +119,11 @@ The repository does not currently ship automated integration tests. Before mergi
 ```bash
 pnpm lint
 pnpm exec tsc --noEmit
+node --experimental-strip-types --test tests/listing-discovery.test.mjs
 pnpm build
 ```
+
+The focused unit tests use Node.js 22's built-in TypeScript stripping and cover listing URL deduplication, intake classification restrictions, contact identity fingerprints, and CSV parsing. The app itself supports Node.js 20+. Database-backed integration tests are not configured; cross-tenant/RLS and provider-failure scenarios require a non-production Supabase project.
 
 `pnpm build` can require network access for Next.js font assets on a clean build. Record environmental failures rather than treating them as passes.
 

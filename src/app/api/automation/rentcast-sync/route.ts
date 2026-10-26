@@ -216,8 +216,7 @@ export async function POST(request: Request) {
               bathrooms: normalized.bathrooms,
               poster_type: normalized.posterType,
               poster_evidence: normalized.posterEvidence,
-              published_at: normalized.firstSeenAt,
-              listing_updated_at: new Date().toISOString(),
+              published_at: normalized.publishedAt,
               last_seen_at: new Date().toISOString(),
               first_seen_at: normalized.firstSeenAt,
             }).eq("id", listingId).eq("organization_id", source.organization_id);
@@ -276,7 +275,7 @@ export async function POST(request: Request) {
             poster_evidence: normalized.posterEvidence,
             poster_method: "provider_metadata",
             poster_confidence: null,
-            published_at: normalized.firstSeenAt,
+            published_at: normalized.publishedAt,
             listing_updated_at: null,
             first_seen_at: normalized.firstSeenAt,
             last_seen_at: new Date().toISOString(),
@@ -351,7 +350,7 @@ export async function POST(request: Request) {
           },
         ];
         for (const contactInput of contactInputs) {
-          if (!contactInput.contact.email && !contactInput.contact.phone) continue;
+          if (!contactInput.contact.name && !contactInput.contact.email && !contactInput.contact.phone) continue;
           const contactResult = await storeListingContact(supabase, {
             organizationId: source.organization_id,
             listingId,

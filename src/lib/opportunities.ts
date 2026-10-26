@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { listingTypeSchema, posterTypeSchema } from "@/lib/providers/types";
+import { listingTypeSchema, posterTypeSchema } from "./providers/types.ts";
 
 export const listingBaseSchema = z.object({
   sourceName: z.string().trim().min(2).max(120).default("Manual entry"),
@@ -61,6 +61,9 @@ export const listingInputSchema = listingBaseSchema.superRefine((input, context)
   if (input.posterType !== "UNKNOWN" && !input.posterEvidence && !input.sourceUrl) {
     context.addIssue({ code: "custom", path: ["posterEvidence"], message: "Record source evidence for the poster classification" });
   }
+  if (input.ownerLedClaim && input.posterType !== "OWNER_UNVERIFIED") {
+    context.addIssue({ code: "custom", path: ["posterType"], message: "Unverified owner claims must use the OWNER_UNVERIFIED classification" });
+  }
   if (input.publicContactContext && !input.sourceUrl) {
     context.addIssue({ code: "custom", path: ["publicContactContext"], message: "A source listing URL is required to record publicly listed contact details" });
   }
@@ -88,7 +91,7 @@ export function normalizeListing(input: ListingInput) {
     dedupeKey,
     title,
     summary: summary.slice(0, 280),
-    description: null,
+    description: input.description?.replace(/\s+/g, " ").trim() || null,
     propertyType: input.propertyType,
     listingType: input.listingType,
     area: input.area.replace(/\s+/g, " ").trim(),

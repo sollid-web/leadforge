@@ -189,7 +189,8 @@ export function OpportunityWorkspace() {
     setNotice("");
     const values = new FormData(event.currentTarget);
     const numericPrice = String(values.get("price") ?? "").trim();
-    const ownerLedClaim = values.get("ownerLedClaim") === "on";
+    const selectedPosterType = String(values.get("posterType") ?? "UNKNOWN");
+    const ownerLedClaim = values.get("ownerLedClaim") === "on" || selectedPosterType === "OWNER_UNVERIFIED";
     if (ownerLedClaim && !values.get("sourceUrl")) {
       setError("Add the original listing or evidence URL for this owner-seller lead.");
       setSaving(false);
@@ -602,7 +603,8 @@ export function OpportunityWorkspace() {
           <label>Last updated date<input name="listingUpdatedAt" type="date" /></label>
           <label className="form-span">Description<textarea name="description" rows={3} maxLength={4000} /></label>
           <label className="form-span">Original listing / evidence URL<input name="sourceUrl" type="url" maxLength={2048} placeholder="https://source.example/listing" /><small>Required when marking this as an owner-seller lead. Use a source your organization is authorized to process.</small></label>
-          <label>Poster classification<select name="posterType"><option value="OWNER_UNVERIFIED">Owner/landlord claimed · unverified</option><option value="UNKNOWN">Unknown</option><option value="AGENT">Agent</option><option value="DEVELOPER">Developer</option><option value="COMPANY">Company</option></select></label>
+          <label className="checkbox-label"><input type="checkbox" name="ownerLedClaim" defaultChecked />Owner/landlord claims this listing</label>
+          <label>Poster classification<select name="posterType"><option value="UNKNOWN">Unknown</option><option value="OWNER_UNVERIFIED">Owner/landlord claimed · unverified</option><option value="AGENT">Agent</option><option value="DEVELOPER">Developer</option><option value="COMPANY">Company</option></select></label>
           <label>Classification method<select name="posterMethod"><option value="owner_submission">Owner-submitted record</option><option value="source_metadata">Source metadata</option><option value="manual_review">Manual review</option></select></label>
           <label className="form-span">Poster evidence<input name="posterEvidence" maxLength={1000} placeholder="What in the source supports this classification?" /><small>Owner-verified classification is only granted through documented manager review.</small></label>
           <label className="form-span">Public contact context<input name="publicContactContext" maxLength={500} placeholder="Where on the original listing is this contact published?" /><small>Fill only when a contact appears on the original listing and your source terms permit its collection.</small></label>
@@ -630,7 +632,7 @@ export function OpportunityWorkspace() {
           <label>Source<select value={sourceIdFilter} onChange={(event) => setSourceIdFilter(event.target.value)}><option value="">All sources</option>{sources.map((source) => <option key={source.id} value={source.id}>{source.name}</option>)}</select></label>
           <label>Property type<select value={propertyTypeFilter} onChange={(event) => setPropertyTypeFilter(event.target.value)}><option value="">All property types</option><option value="house">House</option><option value="apartment">Apartment</option><option value="land">Land</option><option value="commercial">Commercial</option><option value="other">Other</option></select></label>
           <label>Sale or rental<select value={listingTypeFilter} onChange={(event) => setListingTypeFilter(event.target.value)}><option value="">Sale or rental</option><option value="sale">Sale</option><option value="rental">Rental</option></select></label>
-          <label>Poster type<select value={posterTypeFilter} onChange={(event) => setPosterTypeFilter(event.target.value)}><option value="">Owner direct (exclude agents)</option><option value="OWNER_VERIFIED">Owner verified</option><option value="OWNER_UNVERIFIED">Owner unverified</option><option value="UNKNOWN">Unknown</option><option value="AGENT">Include agent listings</option><option value="DEVELOPER">Developer</option><option value="COMPANY">Company</option></select></label>
+          <label>Poster type<select value={posterTypeFilter} onChange={(event) => setPosterTypeFilter(event.target.value)}><option value="">Owner claims only (default)</option><option value="OWNER_VERIFIED">Owner verified</option><option value="OWNER_UNVERIFIED">Owner unverified</option><option value="UNKNOWN">Include unknown poster</option><option value="AGENT">Include agent listings</option><option value="DEVELOPER">Include developers</option><option value="COMPANY">Include companies</option></select></label>
           <label>Minimum price<input type="number" min="0" value={minPriceFilter} onChange={(event) => setMinPriceFilter(event.target.value)} /></label>
           <label>Maximum price<input type="number" min="0" value={maxPriceFilter} onChange={(event) => setMaxPriceFilter(event.target.value)} /></label>
           <label>At least bedrooms<input type="number" min="0" max="100" value={bedroomsFilter} onChange={(event) => setBedroomsFilter(event.target.value)} /></label>

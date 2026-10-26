@@ -39,7 +39,7 @@ cp .env.example .env.local
 pnpm dev
 ```
 
-Apply the ordered SQL migrations to a new Supabase project using the SQL editor or Supabase CLI. Migration `202610250002` grants API-role table privileges; later migrations add RentCast source configuration, manager-only contact inquiries, verified-lead purchase entitlements, and business-prospect discovery. Row-level security still restricts which records each user can access:
+Apply the ordered SQL migrations to a new Supabase project using the SQL editor or Supabase CLI. Migration `202610250002` grants API-role table privileges; later migrations add RentCast source configuration, manager-only contact inquiries, verified-lead purchase entitlements, business-prospect discovery, and owner-direct listing metadata/contact provenance (`202610260006`). Row-level security still restricts which records each user can access:
 
 ```bash
 supabase login
@@ -48,6 +48,14 @@ supabase db push
 ```
 
 Then create an account at `/sign-up`, confirm the email if confirmation is enabled, sign in, and create your organization in **Settings**. Managers can configure their own agent profile and register listing sources there.
+
+### Owner-direct listings and CSV import
+
+The opportunities workspace supports owner-submitted records and a bounded CSV import (2 MB, 100 rows per upload). Import is not a discovery source by itself: only import records your organization is authorized to collect and reuse. Each imported row is validated by the same server-side listing schema as a manual entry, then normalized, deduplicated, scored, and linked to its source. Owner claims remain `OWNER_UNVERIFIED` until a manager records an evidence reference, verification method, and rationale. The `OWNER_VERIFIED` category is unavailable to ordinary manual, CSV, and webhook ingestion.
+
+Required CSV columns: `title`, `property_type`, `area`, `city`, `country_code`. Optional columns include `source_name`, `source_url`, `external_id`, `description`, `listing_type`, `region`, `price`, `currency`, `bedrooms`, `bathrooms`, `published_at`, `listing_updated_at`, `poster_type`, `poster_evidence`, `poster_method`, `public_contact_context`, `address`, `owner_name`, `owner_email`, `owner_phone`, `listing_agent_name`, `listing_agent_email`, and `listing_agent_phone`. Use ISO dates, a two-letter country code, and one row per listing. When using a public contact, provide the original listing URL and explain where the contact appears in `public_contact_context`; the app does not infer consent or permission from public visibility.
+
+Migration `202610260006_owner_direct_discovery.sql` must be applied before using the updated listing workspace. RentCast remains a US-only listing source and does not identify owner-posted properties; no Nigeria owner-direct provider is currently connected or tested. For Nigeria, use owner submissions or an authorized CSV source until an appropriate licensed/approved provider is configured.
 
 ### Environment
 
@@ -122,7 +130,7 @@ For security boundaries, limitations, and vulnerability reporting, see [`SECURIT
 | `GET/PATCH/POST /api/listings/:id/contact-outreach` | Manager-only contact availability, permission/opt-out recording, and confirmed one-to-one listing-contact email |
 | `GET/POST /api/contact-outreach/opt-out` | Public confirmation endpoint for contact email opt-out links |
 | `POST /api/listings/:id/matches` | Rank active agent profiles and save matches |
-| `POST /api/listings/:id/verification` | Record a manager's owner-claim verification decision and evidence |
+| `POST /api/listings/:id/verification` | Record a manager's owner-claim decision, verification method, and evidence |
 | `GET /api/matches` | Return matched summary opportunities for the current agent |
 | `POST /api/matches/:id/interest` | Submit an explicit agent request |
 | `GET /api/interest-requests` | Manager approval queue |
@@ -134,17 +142,18 @@ For security boundaries, limitations, and vulnerability reporting, see [`SECURIT
 | `POST /api/matches/:id/email` | Manager-confirmed summary email to an opted-in agent |
 | `GET /api/health` | Reports runtime configuration, not a database connectivity guarantee |
 
-All request handlers validate payloads server-side and scope data to an authenticated organization, validated source token, or the scheduled-job secret. The app does not yet expose CSV import, agent invitations, subscriptions, refunds, bulk campaigns, or a source crawler.
+All request handlers validate payloads server-side and scope data to an authenticated organization, validated source token, or the scheduled-job secret. CSV import is available for authorized listing data; agent invitations, subscriptions, refunds, bulk campaigns, and a source crawler are not implemented.
 
 ## Validation
 
 ```bash
 pnpm lint
 pnpm exec tsc --noEmit
+node --experimental-strip-types --test tests/listing-discovery.test.mjs
 pnpm build
 ```
 
-There is no automated integration test suite or seeded demo tenant in this repository. Database-backed end-to-end verification requires a configured Supabase project and test accounts.
+The focused unit tests cover listing URL deduplication, intake classification restrictions, contact identity fingerprints, and CSV parsing. The test command uses Node.js 22's built-in TypeScript stripping; the application itself supports Node.js 20+. There is no database-backed integration test suite or seeded demo tenant. Cross-tenant/RLS and provider-failure verification requires a configured non-production Supabase project.
 
 ## Deployment notes
 

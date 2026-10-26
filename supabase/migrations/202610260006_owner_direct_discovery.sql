@@ -162,6 +162,17 @@ create policy listing_poster_reviews_manager_access
   using (public.has_org_role(organization_id, array['owner','admin','manager']::public.member_role[]))
   with check (public.has_org_role(organization_id, array['owner','admin','manager']::public.member_role[]));
 
+create policy listing_contacts_manager_insert
+  on public.listing_contacts for insert
+  with check (public.has_org_role(organization_id, array['owner','admin','manager']::public.member_role[]));
+create policy listing_contacts_manager_read
+  on public.listing_contacts for select
+  using (public.has_org_role(organization_id, array['owner','admin','manager']::public.member_role[]));
+create policy listing_contacts_manager_update
+  on public.listing_contacts for update
+  using (public.has_org_role(organization_id, array['owner','admin','manager']::public.member_role[]))
+  with check (public.has_org_role(organization_id, array['owner','admin','manager']::public.member_role[]));
+
 create policy listing_contact_verifications_manager_read
   on public.listing_contact_verifications for select
   using (public.has_org_role(organization_id, array['owner','admin','manager']::public.member_role[]));
@@ -171,9 +182,11 @@ create policy listing_collection_runs_manager_read
   using (public.has_org_role(organization_id, array['owner','admin','manager']::public.member_role[]));
 
 grant select on public.listing_source_links, public.listing_poster_reviews,
-  public.listing_contact_verifications, public.listing_collection_runs to authenticated;
+  public.listing_contacts, public.listing_contact_verifications,
+  public.listing_collection_runs to authenticated;
 grant insert, update on public.listing_source_links to authenticated;
 grant insert, update on public.listing_poster_reviews to authenticated;
 revoke all on public.listing_contacts from anon, authenticated;
+grant insert, update on public.listing_contacts to authenticated;
 grant all on public.listing_contacts, public.listing_source_links,
   public.listing_contact_verifications, public.listing_collection_runs to service_role;
