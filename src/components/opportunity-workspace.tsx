@@ -31,6 +31,17 @@ type Match = {
 };
 
 type MatchSuggestion = { id: string; agent_id: string; display_name: string; score: number; reasons: string[] };
+type ContactType = "listing_agent" | "listing_office" | "owner";
+type ContactOption = {
+  contactType: ContactType;
+  available: boolean;
+  status: "unknown" | "permitted" | "opted_out";
+  lawfulBasis: string | null;
+  evidenceReference: string | null;
+  ownerVerified?: boolean;
+  recentOutreachStatus: "processing" | "sent" | "failed" | null;
+  lastSentAt: string | null;
+};
 
 async function getError(response: Response) {
   const body = await response.json().catch(() => ({}));
@@ -49,6 +60,11 @@ export function OpportunityWorkspace() {
   const [notice, setNotice] = useState("");
   const [formOpen, setFormOpen] = useState(false);
   const [details, setDetails] = useState<Record<string, string> | null>(null);
+  const [outreachListing, setOutreachListing] = useState<Opportunity | null>(null);
+  const [contactOptions, setContactOptions] = useState<ContactOption[]>([]);
+  const [contactType, setContactType] = useState<ContactType>("listing_agent");
+  const [savingContactPermission, setSavingContactPermission] = useState(false);
+  const [sendingContactEmail, setSendingContactEmail] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -228,6 +244,107 @@ export function OpportunityWorkspace() {
     }
   }
 
+  async function openContactOutreach(item: Opportunity) {
+      setError("");
+      setNotice("");
+      try {
+        const response = await fetch(`/api/listings/${item.id}/contact-outreach`, { cache: "no-store" });
+        if (!response.ok) throw new Error(await getError(response));
+        const body = await response.json();
+        setContactOptions(body.data.contacts as ContactOption[]);
+        setContactType("listing_agent");
+        setOutreachListing(item);
+      } catch (reason) {
+        setError(reason instanceof Error ? reason.message : "Unable to load contact outreach options.");
+      }
+    }
+
+  async function refreshContactOptions() {
+      if (!outreachListing) return;
+      const response = await fetch(`/api/listings/${outreachListing.id}/contact-outreach`, { cache: "no-store" });
+      if (!response.ok) throw new Error(await getError(response));
+      const body = await response.json();
+      setContactOptions(body.data.contacts as ContactOption[]);
+    }
+
+  async function saveContactPermission(event: FormEvent<HTMLFormElement>) {
+      event.preventDefault();
+      if (!outreachListing) return;
+      setSavingContactPermission(true);
+      setError("");
+      try {
+        const values = new FormData(event.currentTarget);
+        const response = await fetch(`/api/listings/${outreachListing.id}/contact-outreach`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contactType,
+            status: "permitted",
+            lawfulBasis: values.get("lawfulBasis"),
+            evidenceReference: values.get("evidenceReference"),
+            authorizationConfirmed: values.get("authorizationConfirmed") === "on",
+          }),
+        });
+        if (!response.ok) throw new Error(await getError(response));
+        setNotice("Contact permission basis recorded and audited.");
+        await refreshContactOptions();
+      } catch (reason) {
+        setError(reason instanceof Error ? reason.message : "Unable to record contact permission.");
+      } finally {
+        setSavingContactPermission(false);
+      }
+    }
+
+  async function recordContactOptOut() {
+      if (!outreachListing || !window.confirm("Record this contact's opt-out? Future outreach to this contact will be blocked.")) return;
+      setError("");
+      try {
+        const response = await fetch(`/api/listings/${outreachListing.id}/contact-outreach`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ contactType, status: "opted_out" }),
+        });
+        if (!response.ok) throw new Error(await getError(response));
+        setNotice("Contact opt-out recorded. Further outreach is blocked.");
+        await refreshContactOptions();
+      } catch (reason) {
+        setError(reason instanceof Error ? reason.message : "Unable to record contact opt-out.");
+      }
+    }
+
+  async function sendContactEmail(event: FormEvent<HTMLFormElement>) {
+      event.preventDefault();
+      if (!outreachListing) return;
+      const form = event.currentTarget;
+      const values = new FormData(form);
+      const subject = String(values.get("subject") ?? "");
+      const recipientLabel = contactType === "owner" ? "verified owner" : contactType === "listing_office" ? "listing office" : "listing agent";
+      if (!window.confirm(`Send this email to the ${recipientLabel} for "${outreachListing.title}"? This will send one manually reviewed message.`)) return;
+      setSendingContactEmail(true);
+      setError("");
+      setNotice("");
+      try {
+        const response = await fetch(`/api/listings/${outreachListing.id}/contact-outreach`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contactType,
+            subject,
+            message: values.get("message"),
+            confirmation: "send",
+          }),
+        });
+        if (!response.ok) throw new Error(await getError(response));
+        setNotice("Property inquiry email sent. The attempt was recorded in the audit log.");
+        await refreshContactOptions();
+        form.reset();
+      } catch (reason) {
+        setError(reason instanceof Error ? reason.message : "Unable to send property inquiry email.");
+      } finally {
+        setSendingContactEmail(false);
+    }
+  }
+
   return (
     <>
       <div className="page-heading">
@@ -257,7 +374,7 @@ export function OpportunityWorkspace() {
             <label>Owner name<input name="ownerName" maxLength={200} autoComplete="off" /></label>
             <label>Owner email<input name="ownerEmail" type="email" maxLength={254} autoComplete="off" /></label>
             <label>Owner phone<input name="ownerPhone" type="tel" maxLength={40} autoComplete="off" /></label>
-          </div><small>Requires OWNER_DATA_ENCRYPTION_KEY. Contact permission is stored as unknown; this app does not send owner outreach.</small></details>
+          </div><small>Requires OWNER_DATA_ENCRYPTION_KEY. Contact permission starts unknown. Private contacts are not used for automated messages.</small></details>
           <div className="form-actions form-span"><button className="primary-button" disabled={saving}>{saving ? "Saving…" : "Save opportunity"}</button></div>
         </form>
       </section>}
@@ -279,7 +396,7 @@ export function OpportunityWorkspace() {
                 <td>{item.score ? <><ScoreBadge score={item.score.score} /><small className="score-label">Trust {item.score.trust_score}/100</small></> : <span className="muted-cell">Not scored</span>}</td>
                 <td><StatusPill tone={item.status === "matched" ? "green" : item.status === "review" ? "purple" : "blue"}>{item.status}</StatusPill></td>
                 <td className="muted-cell">{new Date(item.created_at).toLocaleDateString()}</td>
-                <td><div className="table-row-actions">{item.owner_led_claim && item.owners?.verification_status !== "verified" && <button className="secondary-button small" onClick={() => void verifyOwnerClaim(item)}>Verify</button>}<button className="secondary-button small" onClick={() => void calculateMatches(item.id)}>Match</button><button className="secondary-button small" onClick={() => void suppressOpportunity(item.id)} aria-label={`Suppress ${item.title}`}>Suppress</button></div></td>
+                <td><div className="table-row-actions">{item.owner_led_claim && item.owners?.verification_status !== "verified" && <button className="secondary-button small" onClick={() => void verifyOwnerClaim(item)}>Verify</button>}<button className="secondary-button small" onClick={() => void calculateMatches(item.id)}>Match</button><button className="secondary-button small" onClick={() => void openContactOutreach(item)}>Contact</button><button className="secondary-button small" onClick={() => void suppressOpportunity(item.id)} aria-label={`Suppress ${item.title}`}>Suppress</button></div></td>
               </tr>)}
             </tbody></table></div>}
       </section>
@@ -293,6 +410,35 @@ export function OpportunityWorkspace() {
       </div></section>}
 
       {details && <div className="details-overlay" role="presentation" onClick={() => setDetails(null)}><section className="details-dialog" role="dialog" aria-modal="true" aria-labelledby="details-heading" onClick={(event) => event.stopPropagation()}><div className="panel-header"><div><p className="eyebrow">Approved access</p><h2 id="details-heading">Private property details</h2></div><button className="secondary-button small" onClick={() => setDetails(null)}>Close</button></div><dl>{Object.entries(details).filter(([, value]) => Boolean(value)).map(([key, value]) => <div key={key}><dt>{key.replace(/([A-Z])/g, " $1").replace(/^./, (letter) => letter.toUpperCase())}</dt><dd>{value}</dd></div>)}</dl><small>Access to these details was recorded in the workspace audit log.</small></section></div>}
+
+      {outreachListing && <div className="details-overlay" role="presentation" onClick={() => setOutreachListing(null)}><section className="details-dialog" role="dialog" aria-modal="true" aria-labelledby="contact-outreach-heading" onClick={(event) => event.stopPropagation()}>
+        <div className="panel-header"><div><p className="eyebrow">Manual property inquiry</p><h2 id="contact-outreach-heading">Contact about this listing</h2><p>{outreachListing.title} · {outreachListing.area}, {outreachListing.city}</p></div><button className="secondary-button small" onClick={() => setOutreachListing(null)}>Close</button></div>
+        <p>Messages are sent only after a manager records permission or an applicable lawful basis, composes the email, and confirms sending. Owner outreach requires a verified owner. Maximum 20 contact emails per workspace per 24 hours and one per contact/listing in seven days.</p>
+        <label>Contact<select value={contactType} onChange={(event) => setContactType(event.target.value as ContactType)}><option value="listing_agent">Listing agent</option><option value="listing_office">Listing office</option><option value="owner">Verified owner</option></select></label>
+        {(() => {
+          const contact = contactOptions.find((item) => item.contactType === contactType);
+          if (!contact?.available) return <div className="workspace-state compact">{contactType === "owner" && !contact?.ownerVerified ? "Owner must be verified before owner outreach." : "No email contact is available for this recipient."}</div>;
+          if (contact.status === "opted_out") return <div className="workspace-alert error" role="status">This contact opted out. Outreach is blocked.</div>;
+          return <>
+            {contact.status !== "permitted" ? <form className="settings-form" onSubmit={saveContactPermission}>
+              <p>Before sending, record the permission or lawful basis for this specific inquiry. Follow your organization’s policy and the applicable source terms and local law.</p>
+              <label>Permission / lawful basis<textarea name="lawfulBasis" minLength={5} maxLength={300} required placeholder="Describe the documented consent or applicable lawful basis" /></label>
+              <label>Evidence reference<input name="evidenceReference" minLength={3} maxLength={500} required placeholder="Consent record, case note, or source reference" /></label>
+              <label className="checkbox-label"><input type="checkbox" name="authorizationConfirmed" required />I reviewed the evidence and confirm outreach is permitted for this contact</label>
+              <button className="primary-button" disabled={savingContactPermission}>{savingContactPermission ? "Recording…" : "Record permission"} </button>
+            </form> : <>
+              <div className="workspace-alert success" role="status">Permission recorded: {contact.lawfulBasis}. Evidence: {contact.evidenceReference}</div>
+              <form className="settings-form" onSubmit={sendContactEmail}>
+                <label>Subject<input name="subject" required minLength={3} maxLength={180} defaultValue={`Question about ${outreachListing.title}`} /></label>
+                <label>Message<textarea name="message" required minLength={20} maxLength={4000} rows={6} placeholder="Write a concise, property-specific inquiry. Do not include sensitive owner or agent details." /></label>
+                <button className="primary-button" disabled={sendingContactEmail}>{sendingContactEmail ? "Sending…" : "Review and send email"}</button>
+              </form>
+              <button className="text-button" onClick={() => void recordContactOptOut()}>Record contact opt-out</button>
+              {contact.lastSentAt && <small>Last email sent {new Date(contact.lastSentAt).toLocaleString()} ({contact.recentOutreachStatus}).</small>}
+            </>}
+          </>;
+        })()}
+      </section></div>}
     </>
   );
 }

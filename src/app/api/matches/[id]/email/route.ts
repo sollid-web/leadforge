@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getOrganizationMember, writeAuditLog } from "@/lib/api-auth";
+import { isValidSenderAddress } from "@/lib/email";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -63,9 +64,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (!apiKey || !from || !appUrl) {
     return NextResponse.json({ error: "Email is not configured. Set RESEND_API_KEY, RESEND_FROM_EMAIL, and NEXT_PUBLIC_APP_URL." }, { status: 503 });
   }
-  const parsedFrom = z.string().email().safeParse(from);
   const parsedAppUrl = z.string().url().safeParse(appUrl);
-  if (!parsedFrom.success || !parsedAppUrl.success || new URL(appUrl).protocol !== "https:" && process.env.NODE_ENV === "production") {
+  if (!isValidSenderAddress(from) || !parsedAppUrl.success || new URL(appUrl).protocol !== "https:" && process.env.NODE_ENV === "production") {
     return NextResponse.json({ error: "Email sender or public app URL configuration is invalid" }, { status: 503 });
   }
 

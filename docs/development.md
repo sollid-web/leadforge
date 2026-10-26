@@ -32,7 +32,7 @@ supabase link --project-ref YOUR_PROJECT_REF
 supabase db push
 ```
 
-Alternatively, run the files under [`supabase/migrations`](../supabase/migrations/) in timestamp order in the Supabase SQL editor. The first migration contains the current organization and legacy inbound-lead tables; the second adds the opportunity workflow and RLS rules; the third grants API-role table privileges; the fourth adds RentCast search configuration and safe sync claiming.
+Alternatively, run the files under [`supabase/migrations`](../supabase/migrations/) in timestamp order in the Supabase SQL editor. The first migration contains the current organization and legacy inbound-lead tables; the second adds the opportunity workflow and RLS rules; the third grants API-role table privileges; the fourth adds RentCast search configuration and safe sync claiming; the fifth adds manager-confirmed contact inquiries, permission evidence, and opt-out tracking.
 
 With a running local Supabase stack, apply pending migration files with:
 
@@ -52,7 +52,11 @@ Create an account at `/sign-up`, confirm it if required by Supabase Auth, and si
 
 To enable US listings, obtain a RentCast API key and configure it as the server-only `RENTCAST_API_KEY`. Set `CRON_SECRET` and `OWNER_DATA_ENCRYPTION_KEY` as well. In Settings, register a RentCast search with either one 5-digit ZIP code or a city and two-letter state, select sale or long-term rental, and set a result cap of at most 100. An organization owner/admin must approve the source before it can run.
 
-Schedule an authenticated daily POST to `/api/automation/rentcast-sync`. Each approved source can be fetched at most once every 24 hours, including concurrent scheduler calls; each job invocation makes no more than one provider request and prioritizes the least recently synced source. The connector calls only RentCast's fixed API host. It encrypts full addresses and listing-agent/office contacts; it does not represent those contacts as property owners, email them, or include them in summaries, snapshots, or audit metadata. Review current provider terms and legal obligations before enabling a source.
+Schedule an authenticated daily POST to `/api/automation/rentcast-sync`. Each approved source can be fetched at most once every 24 hours, including concurrent scheduler calls; each job invocation makes no more than one provider request and prioritizes the least recently synced source. The connector calls only RentCast's fixed API host. It encrypts full addresses and listing-agent/office contacts; it does not represent those contacts as property owners or include them in summaries, snapshots, or audit metadata. Managers may separately compose a one-to-one property inquiry after recording permission or an applicable lawful basis with an evidence reference and confirming each send. Owner inquiries additionally require a verified owner. Emails are not sent automatically; review current provider terms and legal obligations before enabling a source or contacting a listing contact.
+
+## Manual contact inquiries
+
+The opportunity workspace provides a manager-only **Contact** action for an encrypted listing-agent, listing-office, or verified-owner email when one is available. Before sending, the manager records the permission or applicable lawful basis and evidence reference, composes a property-specific message, and confirms that individual send. Owner email also requires a verified owner and a permitted owner-contact record. A contact's opt-out blocks future outreach; outgoing messages include an opt-out link. Duplicate messages are limited to one per contact/listing in seven days, with a workspace limit of 20 messages per 24 hours. This is not a campaign tool and does not make a legal determination on the user's behalf.
 
 ## Safe source testing
 
@@ -63,7 +67,7 @@ Schedule an authenticated daily POST to `/api/automation/rentcast-sync`. Each ap
 5. Verify a sanitized snapshot, source-health record, score factors, and audit row are written.
 6. Do not include an owner name, email, phone, full address, or other private details in webhook payloads. The endpoint rejects the private detail schema.
 
-For a manual test, add a listing through the dashboard. Private details are optional and require the encryption key. Keep contact permission unknown unless you have evidence of permission.
+For a manual test, add a listing through the dashboard. Private details are optional and require the encryption key. Keep contact permission unknown unless you have evidence of permission or a documented applicable lawful basis.
 
 ## Database / security checks
 
@@ -78,6 +82,7 @@ The repository does not currently ship automated integration tests. Before mergi
 - an invalid, disabled, or cross-source webhook token is rejected;
 - private payload columns contain ciphertext, not raw contact details.
 - the scheduled source-health endpoint rejects missing/invalid bearer credentials and updates only active, approved external sources.
+- only managers can record contact permission or send inquiries, owner inquiries require owner verification, and opt-out links block further sends.
 
 ## Required local checks
 
@@ -101,3 +106,4 @@ pnpm build
 - Keep n8n disabled until its inbound authentication and source-scoped outbound bearer credential are configured.
 - Set up database backups, security monitoring, retention rules, and a key recovery/rotation plan.
 - Verify `/api/health` and live product routes after deployment; `/api/health` confirms environment configuration only, not a successful database query.
+- Test manual contact permission recording, manager confirmation, owner verification, rate limits, delivery, and opt-out behavior in a non-production workspace.

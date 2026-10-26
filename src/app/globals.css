@@ -168,9 +168,9 @@ td small { display: block; margin-top: 4px; color: #929e97; font-size: 9px; }
 .opportunity-form-panel .panel-header { margin-bottom: 15px; }
 .opportunity-form, .settings-form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .opportunity-form label, .settings-form label, .inline-form label { display: grid; align-content: start; gap: 6px; color: #54645b; font-size: 10px; font-weight: 600; }
-.opportunity-form input, .opportunity-form select, .opportunity-form textarea, .settings-form input, .settings-form select, .inline-form input { width: 100%; min-height: 36px; border: 1px solid #dfe7e2; border-radius: 7px; outline: none; background: #fff; padding: 8px 10px; color: #33453a; font-size: 11px; }
+.opportunity-form input, .opportunity-form select, .opportunity-form textarea, .settings-form input, .settings-form select, .settings-form textarea, .inline-form input { width: 100%; min-height: 36px; border: 1px solid #dfe7e2; border-radius: 7px; outline: none; background: #fff; padding: 8px 10px; color: #33453a; font-size: 11px; }
 .opportunity-form textarea { min-height: 74px; resize: vertical; }
-.opportunity-form input:focus, .opportunity-form select:focus, .opportunity-form textarea:focus, .settings-form input:focus, .settings-form select:focus, .inline-form input:focus { border-color: #8db9a0; box-shadow: 0 0 0 3px rgb(66 133 93 / 10%); }
+.opportunity-form input:focus, .opportunity-form select:focus, .opportunity-form textarea:focus, .settings-form input:focus, .settings-form select:focus, .settings-form textarea:focus, .inline-form input:focus { border-color: #8db9a0; box-shadow: 0 0 0 3px rgb(66 133 93 / 10%); }
 .form-span { grid-column: 1 / -1; }
 .opportunity-form .checkbox-label, .checkbox-label { display: flex; align-items: center; gap: 7px; color: #66766d; font-size: 10px; font-weight: 450; }
 .checkbox-label input { width: 14px; min-height: 14px; accent-color: #287b5b; }
