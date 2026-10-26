@@ -1,24 +1,51 @@
 "use client";
 
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { ScoreBadge, StatusPill } from "@/components/dashboard-shell";
+import { parseCsv } from "@/lib/listing-csv";
 
 type Opportunity = {
   id: string;
   title: string;
   summary: string;
   property_type: string;
+  listing_type: "sale" | "rental";
   area: string;
   city: string;
   region: string | null;
   country_code: string;
   price: number | null;
+  bedrooms: number | null;
   currency: string;
   owner_led_claim: boolean;
+  poster_type: string;
+  poster_confidence: number | null;
+  poster_evidence: string | null;
+  has_public_contact: boolean;
+  has_contact_information: boolean;
+  published_at: string | null;
+  listing_updated_at: string | null;
+  last_seen_at: string;
+  source_id: string;
+  listing_sources: { name: string } | null;
+  listing_source_links: { canonical_url: string | null; source_name: string; last_seen_at: string }[];
   owners: { verification_status: string } | null;
   status: string;
   created_at: string;
   score: { score: number; trust_score: number; factors: { label: string; evidence: string; score: number }[] } | null;
+};
+type DiscoveryMetrics = {
+  totalDiscovered: number;
+  ownerVerified: number;
+  ownerUnverified: number;
+  agentsExcludedByDefault: number;
+  listingsWithPublicContacts: number;
+  listingsMissingContact: number;
+  newlyDiscoveredLast7Days: number;
+  staleListings: number;
+  duplicatesPrevented: number;
+  failedSources: number;
+  lastSuccessfulCollectionAt: string | null;
 };
 
 type Match = {
@@ -35,6 +62,7 @@ type Match = {
 };
 
 type MatchSuggestion = { id: string; agent_id: string; display_name: string; score: number; reasons: string[] };
+type SourceOption = { id: string; name: string };
 type ContactType = "listing_agent" | "listing_office" | "owner";
 type ContactOption = {
   contactType: ContactType;
@@ -56,10 +84,28 @@ export function OpportunityWorkspace() {
   const [opportunities, setOpportunities] = useState<Opportunity[]>([]);
   const [matches, setMatches] = useState<Match[]>([]);
   const [suggestions, setSuggestions] = useState<Record<string, MatchSuggestion[]>>({});
+  const [metrics, setMetrics] = useState<DiscoveryMetrics | null>(null);
+  const [sources, setSources] = useState<SourceOption[]>([]);
   const [search, setSearch] = useState("");
   const [stage, setStage] = useState("all");
+  const [countryCode, setCountryCode] = useState("");
+  const [cityFilter, setCityFilter] = useState("");
+  const [propertyTypeFilter, setPropertyTypeFilter] = useState("");
+  const [listingTypeFilter, setListingTypeFilter] = useState("");
+  const [posterTypeFilter, setPosterTypeFilter] = useState("");
+  const [regionFilter, setRegionFilter] = useState("");
+  const [areaFilter, setAreaFilter] = useState("");
+  const [sourceIdFilter, setSourceIdFilter] = useState("");
+  const [publishedAfterFilter, setPublishedAfterFilter] = useState("");
+  const [updatedAfterFilter, setUpdatedAfterFilter] = useState("");
+  const [minPriceFilter, setMinPriceFilter] = useState("");
+  const [maxPriceFilter, setMaxPriceFilter] = useState("");
+  const [bedroomsFilter, setBedroomsFilter] = useState("");
+  const [contactFilter, setContactFilter] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [formOpen, setFormOpen] = useState(false);
@@ -74,18 +120,41 @@ export function OpportunityWorkspace() {
     setLoading(true);
     setError("");
     try {
-      const [listingResponse, matchResponse] = await Promise.all([fetch("/api/listings"), fetch("/api/matches")]);
+      const params = new URLSearchParams();
+      if (countryCode) params.set("countryCode", countryCode.toUpperCase());
+      if (cityFilter.trim()) params.set("city", cityFilter.trim());
+      if (regionFilter.trim()) params.set("region", regionFilter.trim());
+      if (areaFilter.trim()) params.set("area", areaFilter.trim());
+      if (sourceIdFilter) params.set("sourceId", sourceIdFilter);
+      if (publishedAfterFilter) params.set("publishedAfter", publishedAfterFilter);
+      if (updatedAfterFilter) params.set("updatedAfter", updatedAfterFilter);
+      if (propertyTypeFilter) params.set("propertyType", propertyTypeFilter);
+      if (listingTypeFilter) params.set("listingType", listingTypeFilter);
+      if (posterTypeFilter) params.set("posterType", posterTypeFilter);
+      if (minPriceFilter) params.set("minPrice", minPriceFilter);
+      if (maxPriceFilter) params.set("maxPrice", maxPriceFilter);
+      if (bedroomsFilter) params.set("bedrooms", bedroomsFilter);
+      if (contactFilter) params.set("hasContact", contactFilter);
+      const query = params.size ? `?${params.toString()}` : "";
+      const [listingResponse, matchResponse, sourceResponse] = await Promise.all([
+        fetch(`/api/listings${query}`, { cache: "no-store" }),
+        fetch("/api/matches", { cache: "no-store" }),
+        fetch("/api/sources", { cache: "no-store" }),
+      ]);
       if (!listingResponse.ok) throw new Error(await getError(listingResponse));
       if (!matchResponse.ok) throw new Error(await getError(matchResponse));
-      const [listingBody, matchBody] = await Promise.all([listingResponse.json(), matchResponse.json()]);
+      if (!sourceResponse.ok) throw new Error(await getError(sourceResponse));
+      const [listingBody, matchBody, sourceBody] = await Promise.all([listingResponse.json(), matchResponse.json(), sourceResponse.json()]);
       setOpportunities(listingBody.data as Opportunity[]);
+      setMetrics(listingBody.metrics as DiscoveryMetrics);
       setMatches(matchBody.data as Match[]);
+      setSources(sourceBody.data as SourceOption[]);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Unable to load opportunities.");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [areaFilter, bedroomsFilter, cityFilter, contactFilter, countryCode, listingTypeFilter, maxPriceFilter, minPriceFilter, posterTypeFilter, propertyTypeFilter, publishedAfterFilter, regionFilter, sourceIdFilter, updatedAfterFilter]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => { void load(); }, 0);
@@ -145,6 +214,15 @@ export function OpportunityWorkspace() {
       price: numericPrice ? Number(numericPrice) : undefined,
       currency: values.get("currency"),
       ownerLedClaim,
+      listingType: values.get("listingType"),
+      bedrooms: values.get("bedrooms") ? Number(values.get("bedrooms")) : undefined,
+      bathrooms: values.get("bathrooms") ? Number(values.get("bathrooms")) : undefined,
+      publishedAt: values.get("publishedAt") || undefined,
+      listingUpdatedAt: values.get("listingUpdatedAt") || undefined,
+      posterType: ownerLedClaim ? "OWNER_UNVERIFIED" : values.get("posterType"),
+      posterEvidence: values.get("posterEvidence") || undefined,
+      posterMethod: ownerLedClaim ? "owner_submission" : values.get("posterMethod"),
+      publicContactContext: values.get("publicContactContext") || undefined,
       privateDetails: {
         address: values.get("address") || undefined,
         ownerName: values.get("ownerName") || undefined,
@@ -168,6 +246,87 @@ export function OpportunityWorkspace() {
       setError(reason instanceof Error ? reason.message : "Unable to create opportunity.");
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function importListingsCsv(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0];
+    event.currentTarget.value = "";
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) {
+      setError("CSV import is limited to 2 MB.");
+      return;
+    }
+    setImporting(true);
+    setImportProgress("");
+    setError("");
+    setNotice("");
+    try {
+      const rows = parseCsv(await file.text());
+      if (rows.length > 100) throw new Error("CSV import is limited to 100 listings at a time.");
+      let imported = 0;
+      let duplicates = 0;
+      const failures: string[] = [];
+      for (const [index, row] of rows.entries()) {
+        setImportProgress(`Importing ${index + 1} of ${rows.length}…`);
+        const listingType = row.listing_type || "sale";
+        const posterType = row.poster_type || "UNKNOWN";
+        const payload = {
+          sourceName: row.source_name || "Owner-submitted CSV",
+          sourceType: "manual",
+          externalId: row.external_id || undefined,
+          sourceUrl: row.source_url || undefined,
+          title: row.title,
+          description: row.description || undefined,
+          propertyType: row.property_type,
+          listingType,
+          area: row.area,
+          city: row.city,
+          region: row.region || undefined,
+          countryCode: row.country_code || "NG",
+          price: row.price ? Number(row.price) : undefined,
+          currency: row.currency || ((row.country_code || "NG").toUpperCase() === "NG" ? "NGN" : "USD"),
+          bedrooms: row.bedrooms ? Number(row.bedrooms) : undefined,
+          bathrooms: row.bathrooms ? Number(row.bathrooms) : undefined,
+          publishedAt: row.published_at || undefined,
+          listingUpdatedAt: row.listing_updated_at || undefined,
+          ownerLedClaim: posterType === "OWNER_UNVERIFIED",
+          posterType,
+          posterEvidence: row.poster_evidence || undefined,
+          posterMethod: row.poster_method || "owner_submission",
+          publicContactContext: row.public_contact_context || undefined,
+          privateDetails: {
+            address: row.address || undefined,
+            ownerName: row.owner_name || undefined,
+            ownerEmail: row.owner_email || undefined,
+            ownerPhone: row.owner_phone || undefined,
+            listingAgentName: row.listing_agent_name || undefined,
+            listingAgentEmail: row.listing_agent_email || undefined,
+            listingAgentPhone: row.listing_agent_phone || undefined,
+          },
+        };
+        try {
+          const response = await fetch("/api/listings", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          });
+          if (!response.ok) throw new Error(await getError(response));
+          const result = await response.json();
+          if (result.duplicate) duplicates += 1;
+          else imported += 1;
+        } catch (reason) {
+          failures.push(`Row ${index + 2}: ${reason instanceof Error ? reason.message : "import failed"}`);
+        }
+      }
+      await load();
+      setNotice(`CSV import finished: ${imported} added, ${duplicates} duplicates, ${failures.length} rejected.`);
+      if (failures.length) setError(failures.slice(0, 3).join(" · "));
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Unable to import the CSV.");
+    } finally {
+      setImportProgress("");
+      setImporting(false);
     }
   }
 
@@ -276,6 +435,11 @@ export function OpportunityWorkspace() {
   async function verifyOwnerClaim(item: Opportunity) {
     const evidenceReference = window.prompt("Evidence reference (source URL, document ID, or review reference):")?.trim();
     if (!evidenceReference) return;
+    const verificationMethod = window.prompt(
+      "Verification method: direct_confirmation, ownership_document_review, registry_check, authorized_source_confirmation, or other",
+      "direct_confirmation",
+    )?.trim();
+    if (!verificationMethod) return;
     const reason = window.prompt("Brief verification rationale:")?.trim();
     if (!reason) return;
     setError("");
@@ -283,7 +447,7 @@ export function OpportunityWorkspace() {
       const response = await fetch(`/api/listings/${item.id}/verification`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status: "verified", evidenceReference, reason }),
+        body: JSON.stringify({ status: "verified", verificationMethod, evidenceReference, reason }),
       });
       if (!response.ok) throw new Error(await getError(response));
       setNotice("Owner-listed claim marked verified with evidence and an audit record.");
@@ -398,27 +562,50 @@ export function OpportunityWorkspace() {
     <>
       <div className="page-heading">
         <div>        <p className="eyebrow">Workspace / Opportunities</p><h1>Owner-seller leads</h1><p className="subheading">Find actionable properties offered by owners. Seller contact is shared only with the matched agent after manager review and approval.</p></div>
-        <button className="primary-button" onClick={() => setFormOpen((open) => !open)}>{formOpen ? "Close form" : "+ Add opportunity"}</button>
+        <div className="page-heading-actions">
+          <label className="secondary-button">Import authorized CSV<input className="csv-file-input" type="file" accept=".csv,text/csv" onChange={(event) => void importListingsCsv(event)} disabled={importing} /></label>
+          <button className="primary-button" onClick={() => setFormOpen((open) => !open)}>{formOpen ? "Close form" : "+ Add opportunity"}</button>
+        </div>
       </div>
+      {importProgress && <div className="workspace-alert" role="status">{importProgress}</div>}
 
       <div className="notice-banner"><span>◎</span><div><b>Prioritize genuine owner sellers.</b><p>RentCast provides listing records and may include listing-agent or office contacts; it does not establish an owner-posted listing or supply owner contact details. Add owner-seller leads from authorized sources with the original listing link and a seller phone or email. Agents see contact details only after interest and manager approval.</p></div></div>
       {error && <div className="workspace-alert error" role="alert">{error}</div>}
       {notice && <div className="workspace-alert success" role="status">{notice}</div>}
 
+      {metrics && <section className="metric-grid listing-discovery-metrics" aria-label="Listing discovery metrics">
+        <div className="metric-card"><span className="metric-label">Listings discovered</span><b className="metric-value">{metrics.totalDiscovered}</b><span className="metric-change">No demo records</span></div>
+        <div className="metric-card"><span className="metric-label">Owner verified</span><b className="metric-value">{metrics.ownerVerified}</b><span className="metric-change">Documented review only</span></div>
+        <div className="metric-card"><span className="metric-label">Owner unverified</span><b className="metric-value">{metrics.ownerUnverified}</b><span className="metric-change">Claims need review</span></div>
+        <div className="metric-card"><span className="metric-label">Agents excluded</span><b className="metric-value">{metrics.agentsExcludedByDefault}</b><span className="metric-change">Unless explicitly included</span></div>
+        <div className="metric-card"><span className="metric-label">Public source contacts</span><b className="metric-value">{metrics.listingsWithPublicContacts}</b><span className="metric-change">{metrics.listingsMissingContact} listings have no contact</span></div>
+        <div className="metric-card"><span className="metric-label">Duplicates prevented</span><b className="metric-value">{metrics.duplicatesPrevented}</b><span className="metric-change">{metrics.newlyDiscoveredLast7Days} new in 7 days</span></div>
+        <div className="metric-card"><span className="metric-label">Stale listings</span><b className="metric-value">{metrics.staleListings}</b><span className="metric-change">Not seen in 14 days</span></div>
+        <div className="metric-card"><span className="metric-label">Failed sources</span><b className="metric-value">{metrics.failedSources}</b><span className="metric-change">{metrics.lastSuccessfulCollectionAt ? `Last success ${new Date(metrics.lastSuccessfulCollectionAt).toLocaleString()}` : "No successful collection yet"}</span></div>
+      </section>}
+
       {formOpen && <section className="panel opportunity-form-panel">
-        <div className="panel-header"><div><h2>Add an owner-seller lead</h2><p>Prioritize properties the owner is actually offering. Keep the original listing/evidence link and at least one owner contact method so the lead is actionable.</p></div></div>
+        <div className="panel-header"><div><h2>Add an authorized listing</h2><p>Prioritize owner-submitted records. Keep the original listing/evidence link and document any poster or contact claims; uncertain ownership remains unverified.</p></div></div>
         <form className="opportunity-form" onSubmit={createOpportunity}>
           <label>Listing title<input name="title" required minLength={3} maxLength={200} placeholder="Detached home near the park" /></label>
           <label>Property type<select name="propertyType" required><option value="house">House</option><option value="apartment">Apartment</option><option value="land">Land</option><option value="commercial">Commercial</option><option value="other">Other</option></select></label>
+          <label>Listing type<select name="listingType"><option value="sale">For sale</option><option value="rental">For rent</option></select></label>
           <label>Area / neighborhood<input name="area" required maxLength={120} /></label>
           <label>City<input name="city" required maxLength={120} /></label>
           <label>Region / state<input name="region" maxLength={120} /></label>
-          <label>Country code<input name="countryCode" required minLength={2} maxLength={2} defaultValue="US" /></label>
+          <label>Country code<input name="countryCode" required minLength={2} maxLength={2} defaultValue="NG" /></label>
           <label>Asking price<input name="price" type="number" min="0.01" step="any" /></label>
-          <label>Currency<input name="currency" minLength={3} maxLength={3} defaultValue="USD" /></label>
+          <label>Currency<input name="currency" minLength={3} maxLength={3} defaultValue="NGN" /></label>
+          <label>Bedrooms<input name="bedrooms" type="number" min="0" max="100" step="1" /></label>
+          <label>Bathrooms<input name="bathrooms" type="number" min="0" max="100" step="0.5" /></label>
+          <label>Publication date<input name="publishedAt" type="date" /></label>
+          <label>Last updated date<input name="listingUpdatedAt" type="date" /></label>
           <label className="form-span">Description<textarea name="description" rows={3} maxLength={4000} /></label>
           <label className="form-span">Original listing / evidence URL<input name="sourceUrl" type="url" maxLength={2048} placeholder="https://source.example/listing" /><small>Required when marking this as an owner-seller lead. Use a source your organization is authorized to process.</small></label>
-          <label className="checkbox-label form-span"><input type="checkbox" name="ownerLedClaim" /> Owner is represented as the seller in this source (manager verification still required)</label>
+          <label>Poster classification<select name="posterType"><option value="OWNER_UNVERIFIED">Owner/landlord claimed · unverified</option><option value="UNKNOWN">Unknown</option><option value="AGENT">Agent</option><option value="DEVELOPER">Developer</option><option value="COMPANY">Company</option></select></label>
+          <label>Classification method<select name="posterMethod"><option value="owner_submission">Owner-submitted record</option><option value="source_metadata">Source metadata</option><option value="manual_review">Manual review</option></select></label>
+          <label className="form-span">Poster evidence<input name="posterEvidence" maxLength={1000} placeholder="What in the source supports this classification?" /><small>Owner-verified classification is only granted through documented manager review.</small></label>
+          <label className="form-span">Public contact context<input name="publicContactContext" maxLength={500} placeholder="Where on the original listing is this contact published?" /><small>Fill only when a contact appears on the original listing and your source terms permit its collection.</small></label>
           <details className="private-fields form-span" open><summary>Private seller contact details (encrypted; revealed only after approval)</summary><div className="private-fields-grid">
             <label>Full address<input name="address" maxLength={500} autoComplete="off" /></label>
             <label>Owner name<input name="ownerName" maxLength={200} autoComplete="off" /></label>
@@ -435,18 +622,34 @@ export function OpportunityWorkspace() {
           <select className="filter-button" aria-label="Filter by status" value={stage} onChange={(event) => setStage(event.target.value)}><option value="all">All statuses</option><option value="new">New</option><option value="review">Review</option><option value="matched">Matched</option><option value="closed">Closed</option></select>
           <button className="secondary-button small" onClick={() => void load()}>Refresh</button>
         </div>
+        <div className="listing-filter-grid">
+          <label>Country<input value={countryCode} onChange={(event) => setCountryCode(event.target.value)} placeholder="NG" maxLength={2} /></label>
+          <label>Region / state<input value={regionFilter} onChange={(event) => setRegionFilter(event.target.value)} placeholder="Lagos State" /></label>
+          <label>City / town<input value={cityFilter} onChange={(event) => setCityFilter(event.target.value)} placeholder="Lagos" /></label>
+          <label>Neighborhood / area<input value={areaFilter} onChange={(event) => setAreaFilter(event.target.value)} placeholder="Lekki" /></label>
+          <label>Source<select value={sourceIdFilter} onChange={(event) => setSourceIdFilter(event.target.value)}><option value="">All sources</option>{sources.map((source) => <option key={source.id} value={source.id}>{source.name}</option>)}</select></label>
+          <label>Property type<select value={propertyTypeFilter} onChange={(event) => setPropertyTypeFilter(event.target.value)}><option value="">All property types</option><option value="house">House</option><option value="apartment">Apartment</option><option value="land">Land</option><option value="commercial">Commercial</option><option value="other">Other</option></select></label>
+          <label>Sale or rental<select value={listingTypeFilter} onChange={(event) => setListingTypeFilter(event.target.value)}><option value="">Sale or rental</option><option value="sale">Sale</option><option value="rental">Rental</option></select></label>
+          <label>Poster type<select value={posterTypeFilter} onChange={(event) => setPosterTypeFilter(event.target.value)}><option value="">Owner direct (exclude agents)</option><option value="OWNER_VERIFIED">Owner verified</option><option value="OWNER_UNVERIFIED">Owner unverified</option><option value="UNKNOWN">Unknown</option><option value="AGENT">Include agent listings</option><option value="DEVELOPER">Developer</option><option value="COMPANY">Company</option></select></label>
+          <label>Minimum price<input type="number" min="0" value={minPriceFilter} onChange={(event) => setMinPriceFilter(event.target.value)} /></label>
+          <label>Maximum price<input type="number" min="0" value={maxPriceFilter} onChange={(event) => setMaxPriceFilter(event.target.value)} /></label>
+          <label>At least bedrooms<input type="number" min="0" max="100" value={bedroomsFilter} onChange={(event) => setBedroomsFilter(event.target.value)} /></label>
+          <label>Contact availability<select value={contactFilter} onChange={(event) => setContactFilter(event.target.value)}><option value="">Any contact status</option><option value="true">Publicly listed contact</option><option value="false">Missing contact information</option></select></label>
+          <label>Published on or after<input type="date" value={publishedAfterFilter} onChange={(event) => setPublishedAfterFilter(event.target.value)} /></label>
+          <label>Updated on or after<input type="date" value={updatedAfterFilter} onChange={(event) => setUpdatedAfterFilter(event.target.value)} /></label>
+        </div>
         <div className="table-meta"><span><b>{visibleOpportunities.length}</b> {visibleOpportunities.length === 1 ? "opportunity" : "opportunities"}</span><span>Workspace records · no sample data</span></div>
         {loading ? <div className="workspace-state"><span className="loading-indicator" />Loading organization opportunities…</div>
           : visibleOpportunities.length === 0 ? <div className="workspace-state"><h2>{opportunities.length ? "No opportunities match these filters" : "Your opportunity queue is empty"}</h2><p>{opportunities.length ? "Try a different search or status." : "Add a property record from a permitted source to start scoring and matching."}</p>{!opportunities.length && <button className="primary-button" onClick={() => setFormOpen(true)}>Add your first opportunity</button>}</div>
-            : <div className="table-scroll"><table><thead><tr><th>Opportunity</th><th>Location</th><th>Signal</th><th>Score</th><th>Status</th><th>Added</th><th>Actions</th></tr></thead><tbody>
+            : <div className="table-scroll"><table><thead><tr><th>Opportunity</th><th>Location</th><th>Poster / source</th><th>Score</th><th>Status</th><th>Last seen</th><th>Actions</th></tr></thead><tbody>
               {visibleOpportunities.map((item) => <tr key={item.id}>
-                <td><div className="opportunity-title"><b>{item.title}</b><small>{item.property_type.replace("_", " ")}</small></div></td>
+                <td><div className="opportunity-title"><b>{item.title}</b><small>{item.property_type.replace("_", " ")} · {item.listing_type}{item.bedrooms !== null ? ` · ${item.bedrooms} beds` : ""}{item.price !== null ? ` · ${new Intl.NumberFormat().format(item.price)} ${item.currency}` : ""}</small></div></td>
                 <td><b>{item.area}</b><small>{item.city}{item.region ? `, ${item.region}` : ""} · {item.country_code}</small></td>
-                <td>{item.owner_led_claim ? <StatusPill tone={item.owners?.verification_status === "verified" ? "green" : "amber"}>{item.owners?.verification_status === "verified" ? "Owner claim verified" : "Owner claim · unverified"}</StatusPill> : <span className="muted-cell">No owner claim</span>}</td>
+                <td><StatusPill tone={item.poster_type === "OWNER_VERIFIED" ? "green" : item.poster_type === "OWNER_UNVERIFIED" ? "amber" : item.poster_type === "AGENT" ? "neutral" : "blue"}>{item.poster_type.replaceAll("_", " ")}</StatusPill><small>{item.listing_sources?.name ?? "Unknown source"} · {item.poster_confidence === null ? "confidence unavailable" : `${item.poster_confidence}% confidence`}</small><small>{item.poster_evidence}</small></td>
                 <td>{item.score ? <><ScoreBadge score={item.score.score} /><small className="score-label">Trust {item.score.trust_score}/100</small></> : <span className="muted-cell">Not scored</span>}</td>
                 <td><StatusPill tone={item.status === "matched" ? "green" : item.status === "review" ? "purple" : "blue"}>{item.status}</StatusPill></td>
-                <td className="muted-cell">{new Date(item.created_at).toLocaleDateString()}</td>
-                <td><div className="table-row-actions">{item.owner_led_claim && item.owners?.verification_status !== "verified" && <button className="secondary-button small" onClick={() => void verifyOwnerClaim(item)}>Verify</button>}<button className="secondary-button small" onClick={() => void calculateMatches(item.id)}>Match</button><button className="secondary-button small" onClick={() => void openContactOutreach(item)}>Contact</button><button className="secondary-button small" onClick={() => void suppressOpportunity(item.id)} aria-label={`Suppress ${item.title}`}>Suppress</button></div></td>
+                <td className="muted-cell">{new Date(item.last_seen_at).toLocaleDateString()}</td>
+                <td><div className="table-row-actions">{item.listing_source_links?.[0]?.canonical_url && <a className="secondary-button small" href={item.listing_source_links[0].canonical_url} target="_blank" rel="noreferrer">View original ↗</a>}{item.poster_type === "OWNER_UNVERIFIED" && <button className="secondary-button small" onClick={() => void verifyOwnerClaim(item)}>Review owner claim</button>}<button className="secondary-button small" onClick={() => void calculateMatches(item.id)}>Match</button><button className="secondary-button small" onClick={() => void openContactOutreach(item)}>Contact</button><button className="secondary-button small" onClick={() => void suppressOpportunity(item.id)} aria-label={`Suppress ${item.title}`}>Suppress</button></div></td>
               </tr>)}
             </tbody></table></div>}
       </section>

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import { listingTypeSchema, posterTypeSchema } from "@/lib/providers/types";
 
 export const listingBaseSchema = z.object({
   sourceName: z.string().trim().min(2).max(120).default("Manual entry"),
@@ -12,14 +13,24 @@ export const listingBaseSchema = z.object({
   title: z.string().trim().min(3).max(200),
   description: z.string().trim().max(4000).optional(),
   propertyType: z.enum(["house", "apartment", "land", "commercial", "other"]),
+  listingType: listingTypeSchema.default("sale"),
   area: z.string().trim().min(2).max(120),
   city: z.string().trim().min(2).max(120),
   region: z.string().trim().max(120).optional(),
   countryCode: z.string().trim().length(2).toUpperCase().regex(/^[A-Z]{2}$/),
   price: z.number().positive().max(1_000_000_000_000).optional(),
+  bedrooms: z.number().int().min(0).max(100).optional(),
+  bathrooms: z.number().min(0).max(100).optional(),
   currency: z.string().trim().length(3).toUpperCase().regex(/^[A-Z]{3}$/).default("USD"),
   ownerLedClaim: z.boolean().default(false),
+  posterType: posterTypeSchema.exclude(["OWNER_VERIFIED"]).default("UNKNOWN"),
+  posterConfidence: z.number().int().min(0).max(100).optional(),
+  posterEvidence: z.string().trim().max(1000).optional(),
+  posterMethod: z.enum(["source_metadata", "owner_submission", "manual_review"]).default("manual_review"),
+  publicContactContext: z.string().trim().max(500).optional(),
   firstSeenAt: z.coerce.date().optional(),
+  publishedAt: z.coerce.date().optional(),
+  listingUpdatedAt: z.coerce.date().optional(),
   privateDetails: z.object({
     address: z.string().trim().max(500).optional(),
     ownerName: z.string().trim().max(200).optional(),
@@ -44,6 +55,15 @@ export const listingInputSchema = listingBaseSchema.superRefine((input, context)
       context.addIssue({ code: "custom", path: ["privateDetails"], message: "Owner-seller leads need at least one owner email or phone number" });
     }
   }
+  if (input.posterType === "OWNER_UNVERIFIED" && !input.posterEvidence && !input.sourceUrl) {
+    context.addIssue({ code: "custom", path: ["posterEvidence"], message: "Record source evidence for an owner-unverified classification" });
+  }
+  if (input.posterType !== "UNKNOWN" && !input.posterEvidence && !input.sourceUrl) {
+    context.addIssue({ code: "custom", path: ["posterEvidence"], message: "Record source evidence for the poster classification" });
+  }
+  if (input.publicContactContext && !input.sourceUrl) {
+    context.addIssue({ code: "custom", path: ["publicContactContext"], message: "A source listing URL is required to record publicly listed contact details" });
+  }
 });
 
 export type ListingInput = z.infer<typeof listingInputSchema>;
@@ -54,9 +74,13 @@ export function normalizeListing(input: ListingInput) {
     .join("|")
     .normalize("NFKC")
     .toLocaleLowerCase("en");
-  const dedupeKey = createHash("sha256")
-    .update(`${input.externalId?.trim().toLocaleLowerCase("en") || input.sourceUrl?.toLocaleLowerCase("en") || titleKey(input.title)}|${normalizedAddress}|${input.propertyType}|${input.price ?? ""}`)
-    .digest("hex");
+  const canonicalUrl = canonicalListingUrl(input.sourceUrl);
+  const identity = canonicalUrl
+    ? `url:${canonicalUrl}`
+    : input.externalId
+      ? `external:${input.sourceName.trim().toLocaleLowerCase("en")}:${input.externalId.trim().toLocaleLowerCase("en")}`
+      : `listing:${titleKey(input.title)}|${normalizedAddress}|${input.propertyType}|${input.listingType}|${input.price ?? ""}`;
+  const dedupeKey = createHash("sha256").update(identity).digest("hex");
   const title = input.title.replace(/\s+/g, " ").trim();
   const summary = `${title} in ${input.area}, ${input.city}`;
 
@@ -66,22 +90,37 @@ export function normalizeListing(input: ListingInput) {
     summary: summary.slice(0, 280),
     description: null,
     propertyType: input.propertyType,
+    listingType: input.listingType,
     area: input.area.replace(/\s+/g, " ").trim(),
     city: input.city.replace(/\s+/g, " ").trim(),
     region: input.region?.replace(/\s+/g, " ").trim() || null,
     countryCode: input.countryCode.toUpperCase(),
     price: input.price ?? null,
+    bedrooms: input.bedrooms ?? null,
+    bathrooms: input.bathrooms ?? null,
     currency: input.currency.toUpperCase(),
     ownerLedClaim: input.ownerLedClaim,
+    posterType: input.posterType,
+    posterConfidence: input.posterConfidence ?? (input.posterType === "UNKNOWN" ? null : 25),
+    posterEvidence: input.posterEvidence ?? null,
+    posterMethod: input.posterMethod,
+    publishedAt: input.publishedAt?.toISOString() ?? input.firstSeenAt?.toISOString() ?? null,
+    listingUpdatedAt: input.listingUpdatedAt?.toISOString() ?? null,
     firstSeenAt: input.firstSeenAt?.toISOString() ?? new Date().toISOString(),
-    sourceUrl: input.sourceUrl ? (() => {
-      const source = new URL(input.sourceUrl);
-      source.search = "";
-      source.hash = "";
-      return source.toString();
-    })() : null,
+    sourceUrl: canonicalUrl,
     externalId: input.externalId?.trim() || null,
   };
+}
+
+export function canonicalListingUrl(value?: string) {
+  if (!value) return null;
+  const url = new URL(value);
+  url.hash = "";
+  for (const key of [...url.searchParams.keys()]) {
+    if (/^(utm_.+|fbclid|gclid|mc_cid|mc_eid)$/i.test(key)) url.searchParams.delete(key);
+  }
+  url.hostname = url.hostname.toLocaleLowerCase("en");
+  return url.toString();
 }
 
 function titleKey(title: string) {

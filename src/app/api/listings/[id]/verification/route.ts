@@ -5,6 +5,13 @@ import { getSupabaseServerClient } from "@/lib/supabase/server";
 
 const verificationSchema = z.object({
   status: z.enum(["verified", "rejected"]),
+  verificationMethod: z.enum([
+    "direct_confirmation",
+    "ownership_document_review",
+    "registry_check",
+    "authorized_source_confirmation",
+    "other",
+  ]),
   evidenceReference: z.string().trim().min(3).max(500),
   reason: z.string().trim().min(3).max(500),
 });
@@ -21,7 +28,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (membershipError) return NextResponse.json({ error: "Unable to check organization permissions" }, { status: 500 });
   if (!member) return NextResponse.json({ error: "Manager permission required" }, { status: 403 });
   const { data: listing, error: listingError } = await supabase.from("listings")
-    .select("id,owner_led_claim,source_url")
+    .select("id,owner_led_claim,source_url,poster_type")
     .eq("id", id)
     .eq("organization_id", member.organization_id)
     .maybeSingle();
@@ -57,13 +64,34 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     verification_status: parsed.data.status,
   }, { onConflict: "listing_id" });
   if (ownerError) return NextResponse.json({ error: "Unable to save owner verification state" }, { status: 500 });
+  const classification = parsed.data.status === "verified"
+    ? "OWNER_VERIFIED"
+    : listing.owner_led_claim ? "OWNER_UNVERIFIED" : "UNKNOWN";
+  const { error: classificationError } = await supabase.from("listings").update({
+    poster_type: classification,
+    poster_confidence: parsed.data.status === "verified" ? 100 : 25,
+    poster_evidence: parsed.data.evidenceReference,
+    poster_method: "manual_review",
+  }).eq("id", listing.id).eq("organization_id", member.organization_id);
+  if (classificationError) return NextResponse.json({ error: "Owner review saved but poster classification could not be updated" }, { status: 500 });
+  const { error: posterReviewError } = await supabase.from("listing_poster_reviews").insert({
+    organization_id: member.organization_id,
+    listing_id: listing.id,
+    reviewer_id: user.id,
+    previous_classification: listing.poster_type,
+    classification,
+    verification_method: parsed.data.verificationMethod,
+    evidence_reference: parsed.data.evidenceReference,
+    notes: parsed.data.reason,
+  });
+  if (posterReviewError) return NextResponse.json({ error: "Owner review saved but poster classification evidence could not be recorded" }, { status: 500 });
   const { error: verificationError } = await supabase.from("listing_verifications").insert({
     organization_id: member.organization_id,
     listing_id: listing.id,
     reviewer_id: user.id,
     status: parsed.data.status,
     evidence_reference: parsed.data.evidenceReference,
-    notes: parsed.data.reason,
+    notes: `${parsed.data.verificationMethod}: ${parsed.data.reason}`,
     reviewed_at: new Date().toISOString(),
   });
   if (verificationError) return NextResponse.json({ error: "Verification state changed but its review record could not be saved" }, { status: 500 });
@@ -74,10 +102,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       action: `listing.owner_${parsed.data.status}`,
       entityType: "listing",
       entityId: listing.id,
-      metadata: { evidence_recorded: true, reason_recorded: true },
+      metadata: { evidence_recorded: true, reason_recorded: true, verification_method: parsed.data.verificationMethod, classification },
     });
   } catch {
     return NextResponse.json({ error: "Verification decision saved but its audit record could not be written" }, { status: 500 });
   }
-  return NextResponse.json({ data: { listingId: listing.id, status: parsed.data.status } });
+  return NextResponse.json({ data: { listingId: listing.id, status: parsed.data.status, classification } });
 }

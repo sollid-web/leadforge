@@ -21,6 +21,18 @@ type Prospect = {
   lastEmailStatus?: string | null;
   lastEmailedAt?: string | null;
 };
+type ProspectReply = {
+  id: string;
+  prospect_id: string;
+  sender_email: string;
+  subject: string;
+  message: string;
+  status: "received" | "drafted" | "sending" | "sent" | "failed";
+  ai_draft: string | null;
+  reply_body: string | null;
+  received_at: string;
+  replied_at: string | null;
+};
 
 const stages: { value: ProspectStatus; label: string; tone: "green" | "amber" | "purple" | "blue" | "neutral" }[] = [
   { value: "new", label: "New", tone: "blue" },
@@ -37,6 +49,11 @@ async function responseError(response: Response) {
 
 export function BusinessProspectWorkspace() {
   const [prospects, setProspects] = useState<Prospect[]>([]);
+  const [replies, setReplies] = useState<ProspectReply[]>([]);
+  const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
+  const [reviewedReplies, setReviewedReplies] = useState<Record<string, boolean>>({});
+  const [replyBusyId, setReplyBusyId] = useState<string | null>(null);
+  const [replyError, setReplyError] = useState("");
   const [area, setArea] = useState("");
   const [category, setCategory] = useState("agents");
   const [radiusKm, setRadiusKm] = useState("10");
@@ -60,6 +77,19 @@ export function BusinessProspectWorkspace() {
       if (!response.ok) throw new Error(await responseError(response));
       const body = await response.json();
       setProspects(body.data as Prospect[]);
+      const repliesResponse = await fetch("/api/business-prospect-replies", { cache: "no-store" });
+      if (repliesResponse.ok) {
+        const repliesBody = await repliesResponse.json();
+        const nextReplies = repliesBody.data as ProspectReply[];
+        setReplies(nextReplies);
+        setReplyDrafts((current) => Object.fromEntries(nextReplies.map((reply) => [
+          reply.id,
+          current[reply.id] ?? reply.reply_body ?? reply.ai_draft ?? "",
+        ])));
+        setReplyError("");
+      } else {
+        setReplyError(await responseError(repliesResponse));
+      }
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Unable to load business prospects.");
     } finally {
@@ -145,13 +175,56 @@ export function BusinessProspectWorkspace() {
         body: JSON.stringify({ subject: emailSubject, message: emailMessage, reviewed: true, confirmation: "send" }),
       });
       if (!response.ok) throw new Error(await responseError(response));
-      setNotice(`Business introduction sent to ${emailProspect.name}.`);
+      const body = await response.json();
+      setNotice(body.data.replyRouting
+        ? `Business introduction sent to ${emailProspect.name}. Replies will appear in this pipeline.`
+        : `Business introduction sent to ${emailProspect.name}. Configure RESEND_INBOUND_DOMAIN to collect replies in EstatelQ.`);
       setEmailProspect(null);
       await load();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Unable to send business introduction.");
     } finally {
       setSendingEmail(false);
+    }
+  }
+
+  async function generateReplyDraft(reply: ProspectReply) {
+    setReplyBusyId(reply.id);
+    setError("");
+    setReplyError("");
+    try {
+      const response = await fetch(`/api/business-prospect-replies/${reply.id}/draft`, { method: "POST" });
+      if (!response.ok) throw new Error(await responseError(response));
+      const body = await response.json();
+      setReplyDrafts((current) => ({ ...current, [reply.id]: body.data.draft }));
+      setReplies((current) => current.map((item) => item.id === reply.id ? { ...item, ai_draft: body.data.draft, status: "drafted" } : item));
+    } catch (reason) {
+      setReplyError(reason instanceof Error ? reason.message : "Unable to generate a reply draft.");
+    } finally {
+      setReplyBusyId(null);
+    }
+  }
+
+  async function sendProspectReply(reply: ProspectReply) {
+    const message = (replyDrafts[reply.id] ?? reply.reply_body ?? reply.ai_draft ?? "").trim();
+    if (!message || !reviewedReplies[reply.id]) return;
+    if (!window.confirm(`Send this reviewed reply to ${reply.sender_email}?`)) return;
+    setReplyBusyId(reply.id);
+    setError("");
+    setReplyError("");
+    try {
+      const response = await fetch(`/api/business-prospect-replies/${reply.id}/send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message, reviewed: true, confirmation: "send" }),
+      });
+      if (!response.ok) throw new Error(await responseError(response));
+      setReplies((current) => current.map((item) => item.id === reply.id ? { ...item, status: "sent", reply_body: message } : item));
+      setNotice(`Reply sent to ${reply.sender_email}.`);
+    } catch (reason) {
+      setReplyError(reason instanceof Error ? reason.message : "Unable to send the reply.");
+    } finally {
+      setReplyBusyId(null);
     }
   }
 
@@ -168,6 +241,7 @@ export function BusinessProspectWorkspace() {
     </div>
     {error && <div className="workspace-alert error" role="alert">{error}</div>}
     {notice && <div className="workspace-alert success" role="status">{notice}</div>}
+    {replyError && <div className="workspace-alert error" role="alert">Reply inbox: {replyError}</div>}
 
     <section className="panel prospect-search-panel">
       <div className="panel-header"><div><h2>Discover real-estate businesses</h2><p>Search an area and save matching public business records to your organization.</p></div><StatusPill tone="green">OpenStreetMap source</StatusPill></div>
@@ -219,6 +293,28 @@ export function BusinessProspectWorkspace() {
                   </button>}
                 {prospect.lastEmailedAt && <small>Last sent {new Date(prospect.lastEmailedAt).toLocaleDateString()}</small>}
               </div>}
+              {replies.filter((reply) => reply.prospect_id === prospect.id).map((reply) => (
+                <section className="prospect-reply" key={reply.id}>
+                  <div className="prospect-reply-heading">
+                    <div><b>Reply from {reply.sender_email}</b><small>{new Date(reply.received_at).toLocaleString()} · {reply.subject}</small></div>
+                    <StatusPill tone={reply.status === "sent" ? "green" : reply.status === "failed" ? "amber" : "blue"}>{reply.status}</StatusPill>
+                  </div>
+                  <p className="prospect-reply-message">{reply.message}</p>
+                  {reply.status === "sent"
+                    ? <p className="prospect-email-hint">Your reviewed reply was sent{reply.replied_at ? ` on ${new Date(reply.replied_at).toLocaleString()}` : ""}.</p>
+                    : <div className="prospect-reply-composer">
+                      <button type="button" className="secondary-button small" disabled={replyBusyId === reply.id} onClick={() => void generateReplyDraft(reply)}>
+                        {replyBusyId === reply.id ? "Working…" : "Generate AI draft"}
+                      </button>
+                      <label>Reply draft<textarea value={replyDrafts[reply.id] ?? ""} maxLength={4000} rows={5} placeholder="Generate a draft or write a reply for manager review…" onChange={(event) => setReplyDrafts((current) => ({ ...current, [reply.id]: event.target.value }))} /></label>
+                      <label className="checkbox-label"><input type="checkbox" checked={reviewedReplies[reply.id] ?? false} onChange={(event) => setReviewedReplies((current) => ({ ...current, [reply.id]: event.target.checked }))} />I reviewed and approve this reply to this sender.</label>
+                      <button type="button" className="primary-button" disabled={replyBusyId === reply.id || !reviewedReplies[reply.id] || !(replyDrafts[reply.id] ?? reply.reply_body ?? reply.ai_draft ?? "").trim()} onClick={() => void sendProspectReply(reply)}>
+                        {replyBusyId === reply.id ? "Sending…" : "Review & send reply"}
+                      </button>
+                      <small>Generating a draft sends this email text to OpenAI. Drafts are suggestions only; nothing is sent until a manager edits or approves the text and confirms the send.</small>
+                    </div>}
+                </section>
+              ))}
               <label className="prospect-notes-label">Internal notes<textarea value={notesDraft[prospect.id] ?? prospect.notes ?? ""} maxLength={2000} rows={2} placeholder="Add context, next step, or owner for follow-up…" onChange={(event) => setNotesDraft((current) => ({ ...current, [prospect.id]: event.target.value }))} onBlur={() => {
                 const value = (notesDraft[prospect.id] ?? prospect.notes ?? "").trim();
                 if (value !== (prospect.notes ?? "")) void updateProspect(prospect, { notes: value || null });

@@ -56,7 +56,13 @@ This uses community-mapped business records, not a verified agent directory. Cov
 
 ## Business prospect email
 
-Configure `RESEND_API_KEY`, a verified `RESEND_FROM_EMAIL`, and `NEXT_PUBLIC_APP_URL` before sending. From a prospect card with a listed email, choose **Compose business email**, review/edit the individual message and recipient, tick the confirmation, then confirm the send. Messages are sent through Resend, recorded with the manager, and include an opt-out link. Address-level opt-outs are honored across the workspace. The application enforces one message per prospect per 30 days and a maximum of 20 prospect emails per workspace per 24 hours. Failed provider attempts are recorded; inspect the delivery/audit state before retrying. There is no bulk sender or AI auto-send.
+Configure `RESEND_API_KEY`, a verified `RESEND_FROM_EMAIL`, and `NEXT_PUBLIC_APP_URL` before sending. From a prospect card with a listed email, choose **Compose business email**, review/edit the individual message and recipient, tick the confirmation, then confirm the send. Messages are sent through Resend, recorded with the manager, and include an opt-out link. Address-level opt-outs are honored across the workspace. The application enforces one message per prospect per 30 days and a maximum of 20 prospect emails per workspace per 24 hours. Failed provider attempts are recorded; inspect the delivery/audit state before retrying. There is no bulk sender.
+
+### Inbound replies and AI drafts
+
+To route prospect replies into EstatelQ, configure a Resend receiving domain (Resend-managed or a verified custom domain) and set `RESEND_INBOUND_DOMAIN` to its hostname. Set `RESEND_WEBHOOK_SECRET` to the signing secret from a Resend webhook subscribed to `email.received` at `https://YOUR_APP_URL/api/webhooks/resend/inbound`. Outbound prospect introductions use a unique reply address when this domain is configured. Apply migrations `202610260004` and `202610260005` before using the email/reply workflow; received email bodies are stored in the organization-scoped manager inbox and attachments are not downloaded or retained.
+
+Optionally set the server-only `OPENAI_API_KEY` (and, if needed, `OPENAI_MODEL`). A manager can select **Generate AI draft** on a received reply, edit it, check the review confirmation, and send it. AI is called only on that manager action, uses the original introduction and reply as context, and never sends a message on its own. The selected email text is sent to OpenAI for drafting; review its current API data-use terms before enabling the key. Do not include secrets or sensitive owner/property details in these messages. Messages are sent through Resend; configure and test receiving DNS, the webhook, OpenAI access, and delivery in a non-production workspace before relying on the flow.
 
 ## RentCast scheduled discovery
 

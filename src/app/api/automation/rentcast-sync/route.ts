@@ -1,48 +1,18 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { rentCastConfigurationSchema, rentCastProvider } from "@/lib/providers/rentcast";
+import type { RentCastListing } from "@/lib/providers/rentcast";
 import { normalizeListing, scoreListing } from "@/lib/opportunities";
 import { saveAgentMatches } from "@/lib/matching";
 import { decryptPrivateData, encryptPrivateData } from "@/lib/private-data";
+import { storeListingContact } from "@/lib/listing-contacts";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
 export const runtime = "nodejs";
 
 const MAX_SOURCES_PER_RUN = 25;
 const MAX_PROVIDER_REQUESTS_PER_RUN = 1;
-const RENTCAST_API_BASE = "https://api.rentcast.io/v1/listings";
-
-const sourceConfigSchema = z.object({
-  provider: z.literal("rentcast"),
-  listingType: z.enum(["sale", "rental"]),
-  city: z.string().trim().min(2).max(120).optional(),
-  state: z.string().trim().length(2).regex(/^[A-Z]{2}$/).optional(),
-  zipCode: z.string().trim().regex(/^\d{5}$/).optional(),
-  maxResults: z.number().int().min(1).max(100),
-}).refine((value) => {
-  const hasZip = Boolean(value.zipCode);
-  const hasCityAndState = Boolean(value.city && value.state);
-  return hasZip !== hasCityAndState && !(hasZip && (value.city || value.state));
-});
-
-const contactSchema = z.object({
-  name: z.string().trim().max(200).nullish().transform((value) => value || undefined),
-  email: z.string().trim().max(254).nullish().transform((value) => value || undefined),
-  phone: z.string().trim().max(40).nullish().transform((value) => value || undefined),
-}).passthrough();
-
-const providerListingSchema = z.object({
-  id: z.string().trim().min(1).max(200),
-  formattedAddress: z.string().trim().max(500).nullish().transform((value) => value || undefined),
-  city: z.string().trim().min(2).max(120),
-  state: z.string().trim().min(2).max(120).nullish().transform((value) => value || undefined),
-  zipCode: z.string().trim().max(20).nullish().transform((value) => value || undefined),
-  propertyType: z.string().trim().max(100).nullish().transform((value) => value || undefined),
-  price: z.number().nonnegative().max(1_000_000_000_000).nullish().transform((value) => value ?? undefined),
-  listingDate: z.string().nullish().transform((value) => value || undefined),
-  listingAgent: contactSchema.nullish().transform((value) => value ?? undefined),
-  listingOffice: contactSchema.nullish().transform((value) => value ?? undefined),
-}).passthrough();
 
 function isAuthorized(request: Request, secret: string) {
   const authorization = request.headers.get("authorization");
@@ -67,7 +37,7 @@ function optionalListingDate(value?: string) {
   return Number.isFinite(timestamp) ? new Date(timestamp) : undefined;
 }
 
-function contactDetails(listing: z.infer<typeof providerListingSchema>) {
+function contactDetails(listing: RentCastListing) {
   const validEmail = (value?: string) => value && z.string().email().safeParse(value).success ? value : undefined;
   return {
     address: listing.formattedAddress,
@@ -131,7 +101,7 @@ export async function POST(request: Request) {
       results.push({ sourceId: source.id, status: "deferred", message: "The per-run RentCast request limit has been reached" });
       continue;
     }
-    const parsedConfig = sourceConfigSchema.safeParse(source.configuration);
+    const parsedConfig = rentCastConfigurationSchema.safeParse(source.configuration);
     if (!parsedConfig.success) {
       results.push({ sourceId: source.id, status: "failed", message: "Source search configuration is invalid" });
       continue;
@@ -149,34 +119,23 @@ export async function POST(request: Request) {
       continue;
     }
     providerRequests += 1;
+    const runInsert = await supabase.from("listing_collection_runs").insert({
+      organization_id: source.organization_id,
+      source_id: source.id,
+      provider: rentCastProvider.id,
+      status: "running",
+    }).select("id").single();
+    if (runInsert.error || !runInsert.data) {
+      results.push({ sourceId: source.id, status: "failed", message: "Unable to create a collection run record" });
+      continue;
+    }
+    const runId = runInsert.data.id;
 
     try {
-      const config = parsedConfig.data;
-      const endpointType = config.listingType === "sale" ? "sale" : "rental/long-term";
-      const url = new URL(`${RENTCAST_API_BASE}/${endpointType}`);
-      if (config.zipCode) url.searchParams.set("zipCode", config.zipCode);
-      else {
-        url.searchParams.set("city", config.city!);
-        url.searchParams.set("state", config.state!);
-      }
-      url.searchParams.set("limit", String(config.maxResults));
-
-      const providerResponse = await fetch(url, {
-        headers: { "X-Api-Key": apiKey, Accept: "application/json" },
-        signal: AbortSignal.timeout(15_000),
-        cache: "no-store",
-      });
-      if (!providerResponse.ok) throw new Error(`RentCast returned HTTP ${providerResponse.status}`);
-      const payload: unknown = await providerResponse.json();
-      if (!Array.isArray(payload)) throw new Error("RentCast returned an unexpected response format");
-
-      const validListings: z.infer<typeof providerListingSchema>[] = [];
-      let rejected = 0;
-      for (const item of payload) {
-        const parsedListing = providerListingSchema.safeParse(item);
-        if (parsedListing.success) validListings.push(parsedListing.data);
-        else rejected += 1;
-      }
+      const config = rentCastProvider.parseConfiguration(source.configuration);
+      const searchResult = await rentCastProvider.search(config, apiKey);
+      const validListings = searchResult.listings;
+      const rejected = searchResult.rejected;
 
       const [{ data: profiles, error: profilesError }, { data: agents, error: agentsError }] = await Promise.all([
         supabase.from("agent_profiles")
@@ -189,6 +148,7 @@ export async function POST(request: Request) {
       let imported = 0;
       let duplicates = 0;
       let matched = 0;
+      let contactsFound = 0;
 
       for (const item of validListings) {
         const city = item.city.replace(/\s+/g, " ").trim();
@@ -207,7 +167,14 @@ export async function POST(request: Request) {
           price: item.price,
           currency: "USD",
           ownerLedClaim: false,
+          listingType: config.listingType,
+          bedrooms: item.bedrooms,
+          bathrooms: item.bathrooms,
+          posterType: "UNKNOWN" as const,
+          posterEvidence: "RentCast provides listing-agent/office contact fields, which do not establish the identity of the property poster.",
+          posterMethod: "source_metadata" as const,
           firstSeenAt: optionalListingDate(item.listingDate),
+          publishedAt: optionalListingDate(item.listingDate),
           privateDetails: contactDetails(item),
         };
         const normalized = normalizeListing(input);
@@ -244,6 +211,14 @@ export async function POST(request: Request) {
               region: normalized.region,
               price: normalized.price,
               currency: normalized.currency,
+              listing_type: normalized.listingType,
+              bedrooms: normalized.bedrooms,
+              bathrooms: normalized.bathrooms,
+              poster_type: normalized.posterType,
+              poster_evidence: normalized.posterEvidence,
+              published_at: normalized.firstSeenAt,
+              listing_updated_at: new Date().toISOString(),
+              last_seen_at: new Date().toISOString(),
               first_seen_at: normalized.firstSeenAt,
             }).eq("id", listingId).eq("organization_id", source.organization_id);
             if (listingUpdateError) throw new Error("Unable to refresh listing information");
@@ -294,7 +269,19 @@ export async function POST(request: Request) {
             price: normalized.price,
             currency: normalized.currency,
             owner_led_claim: false,
+            listing_type: normalized.listingType,
+            bedrooms: normalized.bedrooms,
+            bathrooms: normalized.bathrooms,
+            poster_type: normalized.posterType,
+            poster_evidence: normalized.posterEvidence,
+            poster_method: "provider_metadata",
+            poster_confidence: null,
+            published_at: normalized.firstSeenAt,
+            listing_updated_at: null,
             first_seen_at: normalized.firstSeenAt,
+            last_seen_at: new Date().toISOString(),
+            has_public_contact: false,
+            has_contact_information: false,
           }).select("id").single();
           if (listingError || !listing) {
             if (listingError?.code === "23505") {
@@ -323,6 +310,59 @@ export async function POST(request: Request) {
             });
             if (privateWriteError) throw new Error("Listing saved but encrypted detail processing failed");
           }
+        }
+
+        const linkAt = new Date().toISOString();
+        const { error: sourceLinkError } = await supabase.from("listing_source_links").upsert({
+          organization_id: source.organization_id,
+          listing_id: listingId,
+          source_id: source.id,
+          external_id: item.id,
+          canonical_url: normalized.sourceUrl,
+          source_name: source.name,
+          attribution: "RentCast API; provider terms apply",
+          payload_fingerprint: createHash("sha256").update(JSON.stringify({
+            id: item.id, listingType: config.listingType, price: item.price, listingDate: item.listingDate,
+          })).digest("hex"),
+          last_seen_at: linkAt,
+        }, { onConflict: "listing_id,source_id" });
+        if (sourceLinkError) throw new Error("Unable to save listing source attribution");
+        const { error: lastSeenError } = await supabase.from("listings")
+          .update({ last_seen_at: linkAt })
+          .eq("id", listingId)
+          .eq("organization_id", source.organization_id);
+        if (lastSeenError) throw new Error("Unable to update listing last-seen time");
+        const contactInputs = [
+          {
+            contactType: "listing_agent" as const,
+            contact: {
+              name: item.listingAgent?.name,
+              email: item.listingAgent?.email,
+              phone: item.listingAgent?.phone,
+            },
+          },
+          {
+            contactType: "listing_office" as const,
+            contact: {
+              name: item.listingOffice?.name,
+              email: item.listingOffice?.email,
+              phone: item.listingOffice?.phone,
+            },
+          },
+        ];
+        for (const contactInput of contactInputs) {
+          if (!contactInput.contact.email && !contactInput.contact.phone) continue;
+          const contactResult = await storeListingContact(supabase, {
+            organizationId: source.organization_id,
+            listingId,
+            sourceId: source.id,
+            publicationContext: "Contact supplied by the RentCast API; not verified as property owner or listing poster.",
+            contactType: contactInput.contactType,
+            contact: contactInput.contact,
+            provenance: "provider_supplied",
+          });
+          if (contactResult.error) throw new Error("Unable to save provider contact provenance");
+          contactsFound += 1;
         }
 
         const { data: savedListing, error: savedListingError } = await supabase.from("listings")
@@ -403,6 +443,16 @@ export async function POST(request: Request) {
         message,
       }, { onConflict: "source_id" });
       if (healthError) throw new Error("Listings processed but source health could not be updated");
+      const { error: runUpdateError } = await supabase.from("listing_collection_runs").update({
+        status: rejected ? "degraded" : "completed",
+        discovered_count: searchResult.discovered,
+        imported_count: imported,
+        duplicate_count: duplicates,
+        rejected_count: rejected,
+        contacts_found_count: contactsFound,
+        completed_at: completedAt,
+      }).eq("id", runId).eq("organization_id", source.organization_id);
+      if (runUpdateError) throw new Error("Listings processed but collection run metrics could not be saved");
 
       const { error: auditError } = await supabase.from("audit_logs").insert({
         organization_id: source.organization_id,
@@ -444,6 +494,12 @@ export async function POST(request: Request) {
       if (auditError) {
         return NextResponse.json({ error: "RentCast sync failed and its failure audit could not be recorded", results }, { status: 500 });
       }
+      const { error: runUpdateError } = await supabase.from("listing_collection_runs").update({
+        status: "failed",
+        error_message: message.slice(0, 500),
+        completed_at: new Date().toISOString(),
+      }).eq("id", runId).eq("organization_id", source.organization_id);
+      if (runUpdateError) return NextResponse.json({ error: "RentCast sync failed and its collection run could not be updated", results }, { status: 500 });
       results.push({ sourceId: source.id, status: "failed", message });
     }
   }

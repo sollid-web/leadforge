@@ -18,7 +18,7 @@ The product does not scrape property listing websites or send bulk messaging. It
 8. A manager approves or rejects each request with a reason. The first verified owner-seller unlock is free per organization; later approved owner-seller leads require a $25 USD Stripe payment before any private contact is revealed.
 9. A detail response is decrypted on the server and emitted with `Cache-Control: private, no-store`; the reveal is audit logged. Supabase RLS enforces the paid/sample entitlement as well as manager approval. Suppression blocks later reveals and revokes related approvals.
 
-Matched-agent summary email is a separate feature: it is sent only after an agent opts in and a manager confirms each message. For listing contacts, managers can compose and manually send a one-to-one property inquiry only after recording permission or an applicable lawful basis with an evidence reference; owner outreach additionally requires a verified owner. Business prospect emails are individually composed/reviewed and explicitly confirmed; they are limited to one per prospect per 30 days and 20 per workspace per day, with address-level opt-outs honored. No bulk send or automatic contact email runs. These controls do not determine whether a particular outreach is lawful; teams must assess applicable law and source-provider terms before sending. Resend must be configured. Automated customer outreach, invitations, AI messaging, arbitrary website scraping, global MLS access, and AI scoring are not implemented. The n8n export is a disabled webhook orchestration template.
+Matched-agent summary email is a separate feature: it is sent only after an agent opts in and a manager confirms each message. For listing contacts, managers can compose and manually send a one-to-one property inquiry only after recording permission or an applicable lawful basis with an evidence reference; owner outreach additionally requires a verified owner. Business prospect emails are individually composed/reviewed and explicitly confirmed; they are limited to one per prospect per 30 days and 20 per workspace per day, with address-level opt-outs honored. With a configured Resend receiving domain, replies to prospect introductions appear in the manager pipeline. An optional OpenAI integration can draft a response from the original email and the inbound reply; drafts are suggestions only and require manager review and an explicit send confirmation. No inbound reply is automatically answered, and no bulk send or automatic contact email runs. These controls do not determine whether a particular outreach is lawful; teams must assess applicable law and source-provider terms before sending. Resend must be configured. Automated customer outreach, arbitrary website scraping, global MLS access, and AI scoring are not implemented. The n8n export is a disabled webhook orchestration template.
 
 ## Stack
 
@@ -60,15 +60,19 @@ See [`.env.example`](./.env.example). Required for the core application:
 | `SUPABASE_SERVICE_ROLE_KEY` | Server-only key used by source-token ingestion, scheduled sync/health checks, and confirmed-email recipient lookup |
 | `OWNER_DATA_ENCRYPTION_KEY` | Base64-encoded 32-byte AES key for private detail payloads |
 | `NEXT_PUBLIC_APP_URL` | Public application URL used in agent notification links |
-| `RESEND_API_KEY` | Optional server-only Resend credential for manager-confirmed agent notifications and listing-contact inquiries |
+| `RESEND_API_KEY` | Optional server-only Resend credential for manager-confirmed email and inbound email retrieval |
 | `RESEND_FROM_EMAIL` | Verified sender address used for manager-confirmed email |
+| `RESEND_INBOUND_DOMAIN` | Optional receiving domain used for routed prospect replies |
+| `RESEND_WEBHOOK_SECRET` | Optional server-only signing secret for the Resend inbound webhook |
+| `OPENAI_API_KEY` | Optional server-only key used only when a manager requests an AI reply draft |
+| `OPENAI_MODEL` | Optional OpenAI model override; defaults to `gpt-4o-mini` |
 | `CRON_SECRET` | Server-only bearer secret for scheduled sync and source-health jobs |
 | `RENTCAST_API_KEY` | Optional server-only RentCast API credential for US listing discovery |
 | `STRIPE_SECRET_KEY` | Optional server-only Stripe secret key for $25 one-time verified-lead checkout |
 | `STRIPE_WEBHOOK_SECRET` | Optional server-only signing secret for `/api/stripe/webhook` |
 | `OPENSTREETMAP_CONTACT_EMAIL` | Optional monitored contact included in OpenStreetMap Nominatim requests |
 
-Generate an encryption key with `openssl rand -base64 32`. Never use real credentials in a committed file. Keep `SUPABASE_SERVICE_ROLE_KEY`, `OWNER_DATA_ENCRYPTION_KEY`, `RESEND_API_KEY`, `RENTCAST_API_KEY`, `CRON_SECRET`, `STRIPE_SECRET_KEY`, and `STRIPE_WEBHOOK_SECRET` in deployment secret storage; none belongs in a `NEXT_PUBLIC_` variable. Losing the encryption key makes encrypted private details unrecoverable. Key rotation is an operational procedure and is not automated by this MVP.
+Generate an encryption key with `openssl rand -base64 32`. Never use real credentials in a committed file. Keep `SUPABASE_SERVICE_ROLE_KEY`, `OWNER_DATA_ENCRYPTION_KEY`, `RESEND_API_KEY`, `RESEND_WEBHOOK_SECRET`, `OPENAI_API_KEY`, `RENTCAST_API_KEY`, `CRON_SECRET`, `STRIPE_SECRET_KEY`, and `STRIPE_WEBHOOK_SECRET` in deployment secret storage; none belongs in a `NEXT_PUBLIC_` variable. Losing the encryption key makes encrypted private details unrecoverable. Key rotation is an operational procedure and is not automated by this MVP.
 
 ## Source and privacy rules
 
@@ -102,6 +106,10 @@ For security boundaries, limitations, and vulnerability reporting, see [`SECURIT
 | `GET/POST /api/business-prospects` | List saved business prospects / discover and save OpenStreetMap businesses |
 | `PATCH /api/business-prospects/:id` | Update prospect review stage or internal notes |
 | `POST /api/business-prospects/:id/email` | Manager-reviewed individual business introduction via Resend |
+| `GET /api/business-prospect-replies` | List manager-visible replies received by configured prospect reply addresses |
+| `POST /api/business-prospect-replies/:id/draft` | Generate and store an AI reply draft for manager review |
+| `POST /api/business-prospect-replies/:id/send` | Send a manager-reviewed reply through Resend |
+| `POST /api/webhooks/resend/inbound` | Verify and process Resend `email.received` events |
 | `GET/POST /api/business-prospects/opt-out` | Confirm an email recipient's business-email opt-out |
 | `GET/POST /api/sources` | List or register sources |
 | `POST /api/sources/:id/approval` | Owner/admin activates or disables a source |

@@ -50,7 +50,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   const apiKey = process.env.RESEND_API_KEY;
   const from = process.env.RESEND_FROM_EMAIL;
   const appUrl = process.env.NEXT_PUBLIC_APP_URL;
+  const inboundDomain = process.env.RESEND_INBOUND_DOMAIN?.trim().toLocaleLowerCase("en");
   if (!apiKey || !from || !appUrl) return NextResponse.json({ error: "Email is not configured. Set RESEND_API_KEY, RESEND_FROM_EMAIL, and NEXT_PUBLIC_APP_URL." }, { status: 503 });
+  if (inboundDomain && !/^(?=.{1,253}$)([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(inboundDomain)) {
+    return NextResponse.json({ error: "RESEND_INBOUND_DOMAIN must be a valid receiving domain" }, { status: 503 });
+  }
   const parsedAppUrl = z.string().url().safeParse(appUrl);
   if (!isValidSenderAddress(from) || !parsedAppUrl.success || new URL(appUrl).protocol !== "https:" && process.env.NODE_ENV === "production") {
     return NextResponse.json({ error: "Email sender or public app URL configuration is invalid" }, { status: 503 });
@@ -84,6 +88,18 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (!admin) {
     await supabase.from("business_prospect_outreach").update({ status: "failed", failure_reason: "Service-role database access is not configured" }).eq("id", outreachId);
     return NextResponse.json({ error: "Server email opt-out storage requires SUPABASE_SERVICE_ROLE_KEY; no email was sent" }, { status: 503 });
+  }
+  const replyToken = inboundDomain ? randomBytes(32).toString("hex") : null;
+  const replyAddress = replyToken && inboundDomain ? `reply+${replyToken}@${inboundDomain}` : null;
+  if (replyToken) {
+    const { error: replyAddressError } = await admin.from("business_prospect_outreach")
+      .update({ reply_token_hash: createHash("sha256").update(replyToken).digest("hex") })
+      .eq("id", outreachId)
+      .eq("status", "sending");
+    if (replyAddressError) {
+      await supabase.from("business_prospect_outreach").update({ status: "failed", failure_reason: "Could not prepare a reply address" }).eq("id", outreachId);
+      return NextResponse.json({ error: "Could not prepare reply handling; no email was sent" }, { status: 500 });
+    }
   }
   const { error: tokenError } = await admin.from("business_prospect_opt_out_tokens").insert({
     token_hash: tokenHash,
@@ -122,6 +138,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       body: JSON.stringify({
         from,
         to: [recipient],
+        ...(replyAddress ? { reply_to: [replyAddress] } : {}),
         subject: parsed.data.subject,
         text: `${parsed.data.message}\n\nStop future business emails: ${unsubscribeUrl}\nBusiness record: ${prospect.osm_url} (© OpenStreetMap contributors).`,
         html,
@@ -176,5 +193,5 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   } catch {
     return NextResponse.json({ error: "Email was sent but its delivery audit could not be written" }, { status: 500 });
   }
-  return NextResponse.json({ data: { id: outreachId, status: "sent", prospectId: prospect.id } });
+  return NextResponse.json({ data: { id: outreachId, status: "sent", prospectId: prospect.id, replyRouting: Boolean(replyAddress) } });
 }
