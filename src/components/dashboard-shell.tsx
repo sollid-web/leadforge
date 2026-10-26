@@ -25,7 +25,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
   return (
     <div className="app-shell">
       <aside className="sidebar">
-        <Link href="/dashboard" className="brand"><span className="brand-mark">L</span><span>lead<span>forge</span></span></Link>
+        <Link href="/dashboard" className="brand"><span className="brand-mark">E</span><span>Estatel<span>Q</span></span></Link>
         <div className="workspace-switcher"><span className="workspace-avatar">LF</span><span><b>Organization workspace</b><small>Real estate operations</small></span><span className="chevron">⌄</span></div>
         <p className="nav-label">Workspace</p>
         <nav className="side-nav">{nav.map((item) => <Link key={item.href} href={item.href} className={pathname === item.href ? "active" : ""}><span className="nav-icon">{item.icon}</span><span>{item.label}</span></Link>)}</nav>
@@ -33,7 +33,7 @@ export function DashboardShell({ children }: { children: ReactNode }) {
         <nav className="side-nav"><Link href="/dashboard/settings" className={pathname === "/dashboard/settings" ? "active" : ""}><span className="nav-icon">◌</span><span>Settings</span></Link><Link href="/dashboard/settings"><span className="nav-icon">?</span><span>Help centre</span></Link></nav>
         <div className="sidebar-bottom"><div className="plan-card"><div className="plan-top"><span>Workspace status</span><strong>{supabaseConfigured === null ? "Checking" : supabaseConfigured ? "Connected" : "Setup needed"}</strong></div><p>Connect Supabase to store listings, agent profiles, and approval records.</p><Link href="/dashboard/settings">View setup <span>→</span></Link></div><div className="user-row"><span className="user-avatar">U</span><span><b>Signed-in user</b><small>Organization member</small></span></div></div>
       </aside>
-      <main className="main-content"><header className="topbar"><div className="mobile-brand"><span className="brand-mark">L</span> leadforge</div><div className="breadcrumbs"><span>Workspace</span><b>/</b><strong>{pathname === "/dashboard" ? "Overview" : pathname.split("/").pop()?.replace("-", " ")}</strong></div><div className="top-actions"><span className={`demo-pill ${supabaseConfigured ? "connected" : ""}`}><i />{supabaseConfigured === null ? "Checking setup" : supabaseConfigured ? "Supabase configured" : "Setup required"}</span><Link className="icon-button" href="/dashboard/follow-ups" aria-label="Interest review">♧</Link><span className="top-avatar">U</span></div></header><div className="page-content">{children}</div></main>
+      <main className="main-content"><header className="topbar"><div className="mobile-brand"><span className="brand-mark">E</span> EstatelQ</div><div className="breadcrumbs"><span>Workspace</span><b>/</b><strong>{pathname === "/dashboard" ? "Overview" : pathname.split("/").pop()?.replace("-", " ")}</strong></div><div className="top-actions"><span className={`demo-pill ${supabaseConfigured ? "connected" : ""}`}><i />{supabaseConfigured === null ? "Checking setup" : supabaseConfigured ? "Supabase configured" : "Setup required"}</span><Link className="icon-button" href="/dashboard/follow-ups" aria-label="Interest review">♧</Link><span className="top-avatar">U</span></div></header><div className="page-content">{children}</div></main>
     </div>
   );
 }

@@ -1,5 +1,5 @@
 {
-  "name": "LeadForge / Approved listing ingestion",
+  "name": "EstatelQ / Approved listing ingestion",
   "active": false,
   "nodes": [
     {
@@ -7,7 +7,7 @@
       "type": "n8n-nodes-base.webhook",
       "parameters": {
         "httpMethod": "POST",
-        "path": "leadforge/approved-listing",
+        "path": "estatelq/approved-listing",
         "authentication": "headerAuth",
         "responseMode": "responseNode"
       }
@@ -20,11 +20,11 @@
       }
     },
     {
-      "name": "LeadForge ingestion API",
+      "name": "EstatelQ ingestion API",
       "type": "n8n-nodes-base.httpRequest",
       "parameters": {
         "method": "POST",
-        "url": "={{$env.LEADFORGE_BASE_URL}}/api/ingestion/listings",
+        "url": "={{$env.ESTATELQ_BASE_URL}}/api/ingestion/listings",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "sendBody": true,
@@ -57,14 +57,14 @@
       "main": [
         [
           {
-            "node": "LeadForge ingestion API",
+            "node": "EstatelQ ingestion API",
             "type": "main",
             "index": 0
           }
         ]
       ]
     },
-    "LeadForge ingestion API": {
+    "EstatelQ ingestion API": {
       "main": [
         [
           {
@@ -83,6 +83,6 @@
   },
   "meta": {
     "status": "disabled-template",
-    "setup": "Configure LEADFORGE_BASE_URL in n8n. Add a Header Auth credential to the inbound webhook. Configure the outbound HTTP Request with the per-source one-time Bearer token returned when registering a non-manual source. Deploy and approve the source in LeadForge before activating this workflow. This workflow does not fetch or scrape listing websites."
+    "setup": "Configure ESTATELQ_BASE_URL in n8n. Add a Header Auth credential to the inbound webhook. Configure the outbound HTTP Request with the per-source one-time bearer token returned when registering a non-manual source. Deploy and approve the source in EstatelQ before activating this workflow. This workflow does not fetch or scrape listing websites."
   }
 }

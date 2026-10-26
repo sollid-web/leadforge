@@ -2,7 +2,7 @@
 
 ## Project status and scope
 
-LeadForge is an MVP. It has not undergone an independent security assessment and is not certified for production use. Do not use real owner contact information until the deployment, organization policies, Supabase RLS, encryption-key lifecycle, backups, and legal basis for processing have been reviewed.
+EstatelQ is an MVP. It has not undergone an independent security assessment and is not certified for production use. Do not use real owner contact information until the deployment, organization policies, Supabase RLS, encryption-key lifecycle, backups, and legal basis for processing have been reviewed.
 
 ## Reporting a vulnerability
 
@@ -35,7 +35,7 @@ Reports will be reviewed as maintainers are available. No response-time or bount
 - App-level encryption has one active key version and no automated rotation/re-encryption support. Losing the key makes encrypted records unrecoverable.
 - The health endpoint reports required configuration presence, not database reachability.
 - Webhook source health reflects successful ingestion requests; no scheduled remote source-health probe is implemented.
-- Source approval is an organizational assertion, not a legal/contract review performed by LeadForge.
+- Source approval is an organizational assertion, not a legal/contract review performed by EstatelQ.
 - Data retention, lawful basis, consent, and opt-out obligations vary by jurisdiction and remain the operator's responsibility.
 
 Never commit secrets, use the service-role key in a browser, log raw webhook tokens or private detail payloads, or expose owner contact information in an outreach summary.

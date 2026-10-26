@@ -382,7 +382,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
-        "Idempotency-Key": `leadforge-contact-${messageId}`,
+        "Idempotency-Key": `estatelq-contact-${messageId}`,
       },
       body: JSON.stringify({ from, to: [recipient], subject, text, html }),
       signal: AbortSignal.timeout(12000),

@@ -1,8 +1,8 @@
-# LeadForge architecture and implementation boundary
+# EstatelQ architecture and implementation boundary
 
 ## Product boundary
 
-LeadForge is a real-estate opportunity intake, scoring, and agent-routing MVP. It is not a property scraper, an owner-contact broker, a CRM replacement, or a bulk messaging system. The app accepts manually entered records and normalized summaries from sources an organization has approved. A separate business-prospect module queries OpenStreetMap's community business records for agents, brokerages, and property managers; it does not scrape arbitrary websites or establish prospect intent.
+EstatelQ is a real-estate opportunity intake, scoring, and agent-routing MVP. It is not a property scraper, an owner-contact broker, a CRM replacement, or a bulk messaging system. The app accepts manually entered records and normalized summaries from sources an organization has approved. A separate business-prospect module queries OpenStreetMap's community business records for agents, brokerages, and property managers; it does not scrape arbitrary websites or establish prospect intent.
 
 Private property and owner details are separate from opportunity summaries. The agent first receives only a summary. A matched agent explicitly requests access, a manager approves or rejects the request, and only the requesting agent can retrieve details after approval. No owner outreach is automatically generated or sent.
 

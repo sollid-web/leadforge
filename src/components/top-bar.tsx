@@ -22,7 +22,7 @@ export function TopBar({
           href="/dashboard"
           className={`flex items-center gap-2 text-sm font-medium transition-colors hover:text-indigo-600 dark:hover:text-indigo-400`}
         >
-          <span>LeadForge</span>
+          <span>EstatelQ</span>
         </Link>
       </nav>
       <div className="flex items-center gap-3">

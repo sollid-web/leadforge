@@ -112,7 +112,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   }
 
   const htmlBody = parsed.data.message.split("\n").map((line) => `<p>${escapeHtml(line) || "&nbsp;"}</p>`).join("");
-  const html = `${htmlBody}<hr><p style="font-size:12px;color:#666">This individual business introduction was sent by a LeadForge workspace manager. <a href="${escapeHtml(unsubscribeUrl)}">Stop future business emails</a>.</p><p style="font-size:11px;color:#888">Business listing source: <a href="${escapeHtml(prospect.osm_url)}">OpenStreetMap</a> (© OpenStreetMap contributors).</p>`;
+  const html = `${htmlBody}<hr><p style="font-size:12px;color:#666">This individual business introduction was sent by an EstatelQ workspace manager. <a href="${escapeHtml(unsubscribeUrl)}">Stop future business emails</a>.</p><p style="font-size:11px;color:#888">Business listing source: <a href="${escapeHtml(prospect.osm_url)}">OpenStreetMap</a> (© OpenStreetMap contributors).</p>`;
   let providerMessageId: string | null = null;
   let failureReason: string | null = null;
   try {

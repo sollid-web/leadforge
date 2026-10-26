@@ -100,7 +100,7 @@ export async function POST(request: Request) {
 
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL;
   const contactEmail = process.env.OPENSTREETMAP_CONTACT_EMAIL;
-  const userAgent = `LeadForge business discovery${baseUrl ? ` (${baseUrl})` : ""}${contactEmail ? ` (${contactEmail})` : ""}`;
+  const userAgent = `EstatelQ business discovery${baseUrl ? ` (${baseUrl})` : ""}${contactEmail ? ` (${contactEmail})` : ""}`;
   const geocodeUrl = new URL("https://nominatim.openstreetmap.org/search");
   geocodeUrl.searchParams.set("q", parsed.data.area);
   geocodeUrl.searchParams.set("format", "jsonv2");

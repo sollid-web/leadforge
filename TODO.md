@@ -1,4 +1,4 @@
-# LeadForge implementation status
+# EstatelQ implementation status
 
 ## Implemented in the current MVP
 
@@ -26,7 +26,7 @@
 - [ ] Add an independently reviewed outbound channel only if explicit consent, suppression, per-message approval, idempotency, and audit requirements are met.
 - [ ] Run a deployment-level security review and full Supabase-backed acceptance tests.
 
-No production deployment, live email integration, AI provider, or production metrics are claimed.
+No production deployment, AI provider, or production metrics are claimed. Resend is used for individually reviewed prospect and agent emails where configured; automated bulk email is not implemented.
 
 ## Local verification
 

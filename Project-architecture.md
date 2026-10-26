@@ -463,7 +463,7 @@ source policy compliance flags
 user and agent permission controls
 auditability
 Recommended MVP architecture for this repo
-For the current LeadForge repo, the most realistic MVP architecture is:
+For the current EstatelQ repo, the most realistic MVP architecture is:
 
 Frontend:
 

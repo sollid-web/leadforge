@@ -5,7 +5,7 @@ import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
 const tokenSchema = z.string().min(32).max(128).regex(/^[A-Za-z0-9_-]+$/);
 const html = (body: string, status = 200) => new NextResponse(
-  `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>LeadForge email preferences</title><body><main>${body}</main></body></html>`,
+  `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>EstatelQ email preferences</title><body><main>${body}</main></body></html>`,
   { status, headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" } },
 );
 

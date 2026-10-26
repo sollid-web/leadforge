@@ -76,8 +76,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     `${listing.property_type} in ${listing.area}, ${listing.city}`,
     amount,
   ].join("\n");
-  const body = `${summary}\n\nView summary and manage your request: ${new URL("/dashboard/leads", appUrl).toString()}\n\nYou received this because you enabled opportunity email notifications for your LeadForge account.`;
-  const html = `<p>${escapeHtml(listing.title)}</p><p>${escapeHtml(listing.property_type)} in ${escapeHtml(listing.area)}, ${escapeHtml(listing.city)}<br>${escapeHtml(amount)}</p><p><a href="${escapeHtml(new URL("/dashboard/leads", appUrl).toString())}">View opportunity summary</a></p><p>You received this because you enabled opportunity email notifications for your LeadForge account.</p>`;
+  const body = `${summary}\n\nView summary and manage your request: ${new URL("/dashboard/leads", appUrl).toString()}\n\nYou received this because you enabled opportunity email notifications for your EstatelQ account.`;
+  const html = `<p>${escapeHtml(listing.title)}</p><p>${escapeHtml(listing.property_type)} in ${escapeHtml(listing.area)}, ${escapeHtml(listing.city)}<br>${escapeHtml(amount)}</p><p><a href="${escapeHtml(new URL("/dashboard/leads", appUrl).toString())}">View opportunity summary</a></p><p>You received this because you enabled opportunity email notifications for your EstatelQ account.</p>`;
 
   const { data: existing, error: existingError } = await supabase.from("outreach_messages")
     .select("id,status")

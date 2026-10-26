@@ -124,7 +124,7 @@ export function BusinessProspectWorkspace() {
     setEmailProspect(prospect);
     setEmailSubject(`A real-estate lead opportunity for ${prospect.name}`);
     setEmailMessage(
-      `Hello ${prospect.name} team,\n\nI'm reaching out from LeadForge. We help real-estate professionals discover and review property opportunities, including owner-seller leads when verified information is available.\n\nWould you be open to a brief conversation about whether this could be useful for your ${businessType}?\n\nIf this is not relevant, no reply is needed. You can also use the opt-out link below to stop future business emails from our workspace.\n\nBest,\nLeadForge`,
+      `Hello ${prospect.name} team,\n\nI'm reaching out from EstatelQ. We help real-estate professionals discover and review property opportunities, including owner-seller leads when verified information is available.\n\nWould you be open to a brief conversation about whether this could be useful for your ${businessType}?\n\nIf this is not relevant, no reply is needed. You can also use the opt-out link below to stop future business emails from our workspace.\n\nBest,\nEstatelQ`,
     );
     setEmailReviewed(false);
     setError("");

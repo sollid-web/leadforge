@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for helping improve LeadForge. Contributions should preserve the product's privacy gates and keep implementation claims accurate.
+Thanks for helping improve EstatelQ. Contributions should preserve the product's privacy gates and keep implementation claims accurate.
 
 ## Development
 

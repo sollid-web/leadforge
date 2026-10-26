@@ -129,7 +129,7 @@ export async function POST(request: Request) {
     "payment_intent_data[metadata][purchase_id]": purchase.id,
   });
 
-  const idempotencyKey = `leadforge-${purchase.id}-${Math.floor(Date.now() / 86_400_000)}`;
+  const idempotencyKey = `estatelq-${purchase.id}-${Math.floor(Date.now() / 86_400_000)}`;
   let stripeResponse: Response;
   try {
     stripeResponse = await stripeRequest("checkout/sessions", stripeSecret, {
