@@ -28,14 +28,20 @@ export type ListingSearchFilters = {
   posterType?: PosterType[];
 };
 
+export type ProviderSearchResult<TListing> = {
+  listings: TListing[];
+  discovered: number;
+  total?: number;
+  page: number;
+  pageSize: number;
+  hasMore: boolean;
+  rejected: number;
+};
+
 export type ListingProvider<TConfiguration, TListing> = {
   id: string;
   supportedCountries: readonly string[];
   minimumIntervalMs: number;
   parseConfiguration: (value: unknown) => TConfiguration;
-  search: (configuration: TConfiguration, apiKey: string) => Promise<{
-    listings: TListing[];
-    discovered: number;
-    rejected: number;
-  }>;
+  search: (configuration: TConfiguration, apiKey: string) => Promise<ProviderSearchResult<TListing>>;
 };

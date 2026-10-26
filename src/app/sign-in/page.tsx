@@ -18,10 +18,18 @@ export default function SignInPage() {
     const supabase = getSupabaseBrowserClient();
     if (!supabase) { setMessage("Supabase is not configured. Add the required environment variables to enable sign-in."); return; }
     setBusy(true);
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    setBusy(false);
-    if (error) { setMessage(error.message); return; }
-    router.push("/dashboard");
+    try {
+      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) { setMessage(error.message); return; }
+      router.push("/dashboard");
+      router.refresh();
+    } catch (error) {
+      setMessage(error instanceof Error
+        ? `Unable to reach the authentication service: ${error.message}`
+        : "Unable to reach the authentication service. Check your connection and Supabase configuration, then try again.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   return <main className="auth-page"><div className="auth-card"><Link href="/" className="brand auth-brand"><span className="brand-mark">E</span><span>Estatel<span>Q</span></span></Link><div className="auth-heading"><p className="eyebrow">Workspace access</p><h1>Welcome back</h1><p>Sign in to review your lead pipeline and approved follow-ups.</p></div><form onSubmit={submit} className="auth-form"><label>Email address<input type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} required placeholder="you@agency.com" /></label><label>Password<input type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} required placeholder="••••••••" /></label><div className="auth-row"><label className="checkbox-label"><input type="checkbox" /> Remember me</label><Link href="/reset-password">Forgot password?</Link></div>{message && <p className="auth-message">{message}</p>}<button className="primary-button auth-submit" disabled={busy}>{busy ? "Signing in…" : "Sign in"}</button></form><p className="auth-footer">New to EstatelQ? <Link href="/sign-up">Create an account</Link></p></div></main>;

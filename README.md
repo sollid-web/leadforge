@@ -4,19 +4,20 @@ EstatelQ is an early-stage owner-seller lead discovery and agent-routing MVP. Th
 
 The product does not scrape property listing websites or send bulk messaging. Its separate **Business prospects** workspace searches OpenStreetMap's public real-estate business records by area, then saves the mapped businesses into a review pipeline with stages and internal notes. Managers can compose and send an individually reviewed introduction to a listed business email; every message includes an opt-out link. Contact details may be absent, coverage varies, and a map listing does not mean the business asked to be contacted or wants to buy leads. Agents receive summary-only opportunities, and private property or owner details remain encrypted and inaccessible until an agent requests access and an organization manager explicitly approves that request.
 
-**Project status:** working MVP foundation, not a complete or production-certified SaaS. Business prospect discovery uses OpenStreetMap and is distinct from owner-seller lead ingestion. Owner-seller leads can be recorded from authorized sources with an evidence link and seller contact, then manager-verified and approval-gated. RentCast does not provide reliable owner-posted classification or owner contact discovery. One verified seller lead is free per organization; later verified leads cost $25 USD through Stripe Checkout. Automated owner-seller discovery, billing refunds, and subscription management are not implemented. Coverage depends on the data provider and search area; this is not a global MLS connection. No sample records are used as operational data.
+**Project status:** working MVP foundation, not a complete or production-certified SaaS. Business prospect discovery uses OpenStreetMap and is distinct from owner-seller lead ingestion. Owner-seller leads can be recorded from authorized sources with an evidence link and seller contact, then manager-verified and approval-gated. RentCast does not provide reliable owner-posted classification or owner contact discovery. An Untera international search workflow is implemented but gated on a configured key and confirmed commercial-use permission; importing results is separately gated on written permission to retain and redistribute provider records. The external API has not been live-tested in this deployment, and Untera records must not be treated as owner-direct unless its supplied poster metadata supports that candidate classification. One verified seller lead is free per organization; later verified leads cost $25 USD through Stripe Checkout. Automated owner-seller discovery, billing refunds, and subscription management are not implemented. Coverage depends on the data provider and search area; this is not a global MLS connection. No sample records are used as operational data.
 
 ## Current product flows
 
 1. An authenticated user creates an organization from **Settings**. The creator becomes its owner.
 2. A manager can search the **Business prospects** workspace for real-estate agents, brokerages, or property managers near a city/region. Results are saved by OpenStreetMap record ID, deduplicated, and organized with review stages and internal notes.
-3. A manager manually records an opportunity, registers a webhook source, or configures a RentCast search by ZIP code or city/state.
+3. A manager manually records an opportunity, registers a webhook source, or configures a RentCast search by ZIP code or city/state. The opportunities workspace also supports user-triggered Untera international searches; live result records remain separate from saved organization records until explicitly imported.
 4. External listing sources stay inactive until an owner/admin approves them. An authenticated daily RentCast sync fetches up to 100 US sale or long-term rental listings from one configured search per job; each source is subject to a 24-hour lock.
-5. Managers can add owner-seller leads from authorized sources with the original listing/evidence URL and at least one seller email or phone. Contacts are encrypted, and verification requires a saved seller contact and manager-reviewed evidence.
-6. EstatelQ normalizes and deduplicates provider records, stores sanitized snapshots, calculates explainable scores, encrypts listing-agent/office contacts and full addresses, and records source health and audit events.
-7. New listings are automatically ranked against active agent profiles; matching summaries are available in-app. Agents can explicitly request details.
-8. A manager approves or rejects each request with a reason. The first verified owner-seller unlock is free per organization; later approved owner-seller leads require a $25 USD Stripe payment before any private contact is revealed.
-9. A detail response is decrypted on the server and emitted with `Cache-Control: private, no-store`; the reveal is audit logged. Supabase RLS enforces the paid/sample entitlement as well as manager approval. Suppression blocks later reveals and revokes related approvals.
+5. Untera search requires its server-side API key, an approved organization source, and `UNTERA_COMMERCIAL_USE_AUTHORIZED=true` after commercial-use authorization is confirmed. Importing records additionally requires `UNTERA_LISTING_REUSE_AUTHORIZED=true` after written retention and redistribution permission is obtained. The UI reports provider poster categories conservatively and always shows Untera attribution. No live Untera operation is claimed until a real API smoke test passes.
+6. Managers can add owner-seller leads from authorized sources with the original listing/evidence URL and at least one seller email or phone. Contacts are encrypted, and verification requires a saved seller contact and manager-reviewed evidence.
+7. EstatelQ normalizes and deduplicates provider records, stores sanitized snapshots, calculates explainable scores, encrypts listing-agent/office contacts and full addresses, and records source health and audit events.
+8. New listings are automatically ranked against active agent profiles; matching summaries are available in-app. Agents can explicitly request details.
+9. A manager approves or rejects each request with a reason. The first verified owner-seller unlock is free per organization; later approved owner-seller leads require a $25 USD Stripe payment before any private contact is revealed.
+10. A detail response is decrypted on the server and emitted with `Cache-Control: private, no-store`; the reveal is audit logged. Supabase RLS enforces the paid/sample entitlement as well as manager approval. Suppression blocks later reveals and revokes related approvals.
 
 Matched-agent summary email is a separate feature: it is sent only after an agent opts in and a manager confirms each message. For listing contacts, managers can compose and manually send a one-to-one property inquiry only after recording permission or an applicable lawful basis with an evidence reference; owner outreach additionally requires a verified owner. Business prospect emails are individually composed/reviewed and explicitly confirmed; they are limited to one per prospect per 30 days and 20 per workspace per day, with address-level opt-outs honored. With a configured Resend receiving domain, replies to prospect introductions appear in the manager pipeline. An optional OpenAI integration can draft a response from the original email and the inbound reply; drafts are suggestions only and require manager review and an explicit send confirmation. No inbound reply is automatically answered, and no bulk send or automatic contact email runs. These controls do not determine whether a particular outreach is lawful; teams must assess applicable law and source-provider terms before sending. Resend must be configured. Automated customer outreach, arbitrary website scraping, global MLS access, and AI scoring are not implemented. The n8n export is a disabled webhook orchestration template.
 
@@ -39,7 +40,7 @@ cp .env.example .env.local
 pnpm dev
 ```
 
-Apply the ordered SQL migrations to a new Supabase project using the SQL editor or Supabase CLI. Migration `202610250002` grants API-role table privileges; later migrations add RentCast source configuration, manager-only contact inquiries, verified-lead purchase entitlements, business-prospect discovery, and owner-direct listing metadata/contact provenance (`202610260006`). Row-level security still restricts which records each user can access:
+Apply the ordered SQL migrations to a new Supabase project using the SQL editor or Supabase CLI. Migration `202610250002` grants API-role table privileges; later migrations add RentCast source configuration, manager-only contact inquiries, verified-lead purchase entitlements, business-prospect discovery, owner-direct listing metadata/contact provenance (`202610260006`), and Untera search diagnostics/rate limits (`202610260007`). Row-level security still restricts which records each user can access:
 
 ```bash
 supabase login
@@ -55,7 +56,7 @@ The opportunities workspace supports owner-submitted records and a bounded CSV i
 
 Required CSV columns: `title`, `property_type`, `area`, `city`, `country_code`. Optional columns include `source_name`, `source_url`, `external_id`, `description`, `listing_type`, `region`, `price`, `currency`, `bedrooms`, `bathrooms`, `published_at`, `listing_updated_at`, `poster_type`, `poster_evidence`, `poster_method`, `public_contact_context`, `address`, `owner_name`, `owner_email`, `owner_phone`, `listing_agent_name`, `listing_agent_email`, and `listing_agent_phone`. Use ISO dates, a two-letter country code, and one row per listing. When using a public contact, provide the original listing URL and explain where the contact appears in `public_contact_context`; the app does not infer consent or permission from public visibility.
 
-Migration `202610260006_owner_direct_discovery.sql` must be applied before using the updated listing workspace. RentCast remains a US-only listing source and does not identify owner-posted properties; no Nigeria owner-direct provider is currently connected or tested. For Nigeria, use owner submissions or an authorized CSV source until an appropriate licensed/approved provider is configured.
+Migrations `202610260006_owner_direct_discovery.sql` and `202610260007_untera_discovery.sql` must be applied before using all updated listing workspace features. RentCast remains a US-only listing source and does not identify owner-posted properties. Untera search is implemented, but in this deployment it is not connected or live-tested; see the setup and permission requirements below. No verified Nigeria owner-direct provider is currently connected or tested. For Nigeria, use owner submissions or an authorized CSV source until an appropriate licensed/approved provider is configured.
 
 ### Environment
 
@@ -64,7 +65,7 @@ See [`.env.example`](./.env.example). Required for the core application:
 | Variable | Purpose |
 | --- | --- |
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL |
-| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase publishable/anon key; browser-exposed by design and constrained by RLS |
+| `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Supabase publishable key; browser-exposed by design and constrained by RLS. Legacy `NEXT_PUBLIC_SUPABASE_ANON_KEY` is also supported. |
 | `SUPABASE_SERVICE_ROLE_KEY` | Server-only key used by source-token ingestion, scheduled sync/health checks, and confirmed-email recipient lookup |
 | `OWNER_DATA_ENCRYPTION_KEY` | Base64-encoded 32-byte AES key for private detail payloads |
 | `NEXT_PUBLIC_APP_URL` | Public application URL used in agent notification links |
@@ -76,11 +77,14 @@ See [`.env.example`](./.env.example). Required for the core application:
 | `OPENAI_MODEL` | Optional OpenAI model override; defaults to `gpt-4o-mini` |
 | `CRON_SECRET` | Server-only bearer secret for scheduled sync and source-health jobs |
 | `RENTCAST_API_KEY` | Optional server-only RentCast API credential for US listing discovery |
+| `UNTERA_API_KEY` | Optional server-only Untera key for international search |
+| `UNTERA_COMMERCIAL_USE_AUTHORIZED` | Set to `true` only after Untera confirms the applicable plan permits this commercial search workflow |
+| `UNTERA_LISTING_REUSE_AUTHORIZED` | Set to `true` only after written confirmation permits retaining and redistributing the listing data as leads |
 | `STRIPE_SECRET_KEY` | Optional server-only Stripe secret key for $25 one-time verified-lead checkout |
 | `STRIPE_WEBHOOK_SECRET` | Optional server-only signing secret for `/api/stripe/webhook` |
 | `OPENSTREETMAP_CONTACT_EMAIL` | Optional monitored contact included in OpenStreetMap Nominatim requests |
 
-Generate an encryption key with `openssl rand -base64 32`. Never use real credentials in a committed file. Keep `SUPABASE_SERVICE_ROLE_KEY`, `OWNER_DATA_ENCRYPTION_KEY`, `RESEND_API_KEY`, `RESEND_WEBHOOK_SECRET`, `OPENAI_API_KEY`, `RENTCAST_API_KEY`, `CRON_SECRET`, `STRIPE_SECRET_KEY`, and `STRIPE_WEBHOOK_SECRET` in deployment secret storage; none belongs in a `NEXT_PUBLIC_` variable. Losing the encryption key makes encrypted private details unrecoverable. Key rotation is an operational procedure and is not automated by this MVP.
+Generate an encryption key with `openssl rand -base64 32`. Never use real credentials in a committed file. Keep `SUPABASE_SERVICE_ROLE_KEY`, `OWNER_DATA_ENCRYPTION_KEY`, `RESEND_API_KEY`, `RESEND_WEBHOOK_SECRET`, `OPENAI_API_KEY`, `RENTCAST_API_KEY`, `UNTERA_API_KEY`, `CRON_SECRET`, `STRIPE_SECRET_KEY`, and `STRIPE_WEBHOOK_SECRET` in deployment secret storage; none belongs in a `NEXT_PUBLIC_` variable. Do not enable either Untera authorization flag based only on public visibility or generic API access: confirm the exact use and retention rights with the provider. Losing the encryption key makes encrypted private details unrecoverable. Key rotation is an operational procedure and is not automated by this MVP.
 
 ## Source and privacy rules
 

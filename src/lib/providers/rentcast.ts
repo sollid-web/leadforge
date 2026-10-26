@@ -65,7 +65,15 @@ async function search(configuration: RentCastConfiguration, apiKey: string) {
     else rejected += 1;
   }
   if (rejected && !listings.length) throw new Error("RentCast returned records that did not match the supported listing schema");
-  return { listings, discovered: payload.length, rejected };
+  return {
+    listings,
+    discovered: payload.length,
+    total: payload.length,
+    page: 1,
+    pageSize: configuration.maxResults,
+    hasMore: payload.length === configuration.maxResults,
+    rejected,
+  };
 }
 
 export const rentCastProvider: ListingProvider<RentCastConfiguration, RentCastListing> = {

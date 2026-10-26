@@ -2,6 +2,7 @@
 
 import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { ScoreBadge, StatusPill } from "@/components/dashboard-shell";
+import { UnteraDiscovery } from "@/components/untera-discovery";
 import { parseCsv } from "@/lib/listing-csv";
 
 type Opportunity = {
@@ -573,6 +574,8 @@ export function OpportunityWorkspace() {
       <div className="notice-banner"><span>◎</span><div><b>Prioritize genuine owner sellers.</b><p>RentCast provides listing records and may include listing-agent or office contacts; it does not establish an owner-posted listing or supply owner contact details. Add owner-seller leads from authorized sources with the original listing link and a seller phone or email. Agents see contact details only after interest and manager approval.</p></div></div>
       {error && <div className="workspace-alert error" role="alert">{error}</div>}
       {notice && <div className="workspace-alert success" role="status">{notice}</div>}
+
+      <UnteraDiscovery />
 
       {metrics && <section className="metric-grid listing-discovery-metrics" aria-label="Listing discovery metrics">
         <div className="metric-card"><span className="metric-label">Listings discovered</span><b className="metric-value">{metrics.totalDiscovered}</b><span className="metric-change">No demo records</span></div>

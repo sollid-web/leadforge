@@ -4,7 +4,10 @@ import { StatusPill } from "@/components/dashboard-shell";
 export const dynamic = "force-dynamic";
 
 export default function AutomationsPage() {
-  const supabaseConfigured = Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
+  const supabaseConfigured = Boolean(
+    process.env.NEXT_PUBLIC_SUPABASE_URL
+    && (process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY),
+  );
   const webhookConfigured = Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
   const rentcastConfigured = Boolean(process.env.RENTCAST_API_KEY && process.env.CRON_SECRET && process.env.OWNER_DATA_ENCRYPTION_KEY && webhookConfigured);
   const inboundRepliesConfigured = Boolean(process.env.RESEND_API_KEY && process.env.RESEND_FROM_EMAIL && process.env.RESEND_INBOUND_DOMAIN && process.env.RESEND_WEBHOOK_SECRET && webhookConfigured);

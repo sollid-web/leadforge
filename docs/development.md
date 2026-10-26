@@ -14,7 +14,7 @@ pnpm install
 cp .env.example .env.local
 ```
 
-Fill the Supabase URL, anon key, server-only service-role key, and a newly generated `OWNER_DATA_ENCRYPTION_KEY`. Generate that key with:
+Fill the Supabase URL, publishable key (`NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`; older projects can use `NEXT_PUBLIC_SUPABASE_ANON_KEY`), server-only service-role key, and a newly generated `OWNER_DATA_ENCRYPTION_KEY`. The URL and key must come from the same Supabase project. Generate the encryption key with:
 
 ```bash
 openssl rand -base64 32
@@ -32,7 +32,7 @@ supabase link --project-ref YOUR_PROJECT_REF
 supabase db push
 ```
 
-Alternatively, run the files under [`supabase/migrations`](../supabase/migrations/) in timestamp order in the Supabase SQL editor. The first migration contains the current organization and legacy inbound-lead tables; the second adds the opportunity workflow and RLS rules; the third grants API-role table privileges; later migrations add RentCast search configuration, manager-confirmed contact inquiries, verified-lead purchases, the business-prospect pipeline, and owner-direct listing/source/contact provenance (`202610260006`).
+Alternatively, run the files under [`supabase/migrations`](../supabase/migrations/) in timestamp order in the Supabase SQL editor. The first migration contains the current organization and legacy inbound-lead tables; the second adds the opportunity workflow and RLS rules; the third grants API-role table privileges; later migrations add RentCast search configuration, manager-confirmed contact inquiries, verified-lead purchases, the business-prospect pipeline, owner-direct listing/source/contact provenance (`202610260006`), and Untera search diagnostics/rate limits (`202610260007`).
 
 With a running local Supabase stack, apply pending migration files with:
 
@@ -53,6 +53,26 @@ Create an account at `/sign-up`, confirm it if required by Supabase Auth, and si
 Open **Business prospects** and search a city, region, or country for real-estate agents, brokerages, or property-management companies. The app geocodes the submitted area with Nominatim and searches nearby OpenStreetMap records through Overpass. Results are deduplicated per organization by OpenStreetMap object ID and organized into review stages with internal notes. Only manager-level workspace members can search or edit the prospect pipeline. Searches are limited to one per workspace every 30 seconds, and a shared database throttle respects the public Nominatim service's one-request-per-second policy.
 
 This uses community-mapped business records, not a verified agent directory. Coverage and listed business contact details vary by location and may be missing or stale. Results do not mean a business opted in or has interest in purchasing leads; the workflow does not automatically contact prospects. Data is attributed to [OpenStreetMap contributors](https://www.openstreetmap.org/copyright) and subject to the [Open Database License](https://opendatacommons.org/licenses/odbl/). Review those terms before exporting or redistributing prospect data. For Nominatim client identification, configure `OPENSTREETMAP_CONTACT_EMAIL` with a monitored application contact address. No external API key is required.
+
+## Untera international property discovery
+
+The opportunity workspace has a user-triggered Untera search UI. It retrieves country coverage from Untera's source registry; no list of countries is hard-coded. The current provider documentation advertises coverage across 80+ countries and 190+ sources, but this app presents only country codes returned by the authenticated source registry. A registry response and successful live search are required before claiming coverage for a particular country.
+
+To configure it, request an API key through [Untera's developer documentation](https://untera.io/developers), then set the following **server-only** environment values:
+
+```dotenv
+UNTERA_API_KEY=...
+UNTERA_COMMERCIAL_USE_AUTHORIZED=false
+UNTERA_LISTING_REUSE_AUTHORIZED=false
+```
+
+Do not set either authorization flag to `true` until you have confirmed in writing that the applicable Untera plan permits this commercial use. `UNTERA_COMMERCIAL_USE_AUTHORIZED=true` enables live source-registry and search requests. `UNTERA_LISTING_REUSE_AUTHORIZED=true` additionally enables fetching detail records and importing them to the organization database. The provider's public free-tier description is for prototypes, research, and side projects; its publicly accessible terms do not clearly grant the commercial lead resale, retention, or redistribution rights. Upgrade or obtain explicit provider confirmation before activation for a lead-sales business. Do not treat public listing visibility as reuse permission.
+
+Then sign in as an organization manager, visit **Settings → Approved listing sources**, select **Public listing API → Untera**, register the source, and have an owner/admin approve and activate it. On the **Opportunities** page, load coverage, choose a country from the returned registry, set supported filters, and run a live search. Results are marked as live-only and are not persisted until **Import to saved opportunities** is explicitly selected. The provider requires visible **Powered by Untera** attribution. Catalog/search requests are server-side; the API key is never returned to the browser. Requests are paced and globally rate-limited in the database.
+
+Poster metadata is not proof of property ownership: an explicit provider owner label becomes `OWNER_UNVERIFIED`, an unrecognized or absent poster remains `UNKNOWN`, and nothing is promoted to `OWNER_VERIFIED` by this integration. The default live search shows only provider records explicitly categorized as owner candidates; switch the poster filter to explore the broader set. Contact data, when supplied, is omitted from search responses and fetched only server-side during an explicitly permitted import. It is encrypted, provenance-tracked, and is not treated as outreach consent. If the provider does not return a usable original URL or required city/transaction information, the app refuses import rather than inventing fields. No portal scraping is performed.
+
+Migration `202610260007_untera_discovery.sql` must be applied before using the Untera features. It adds collection-run diagnostics and a database-backed provider rate limit; it does not alter or delete existing listing records. Automated tests use mocked HTTP responses and do not establish that the live API is configured or functioning. Without a configured API key and confirmed authorization, live testing is blocked.
 
 ## Business prospect email
 

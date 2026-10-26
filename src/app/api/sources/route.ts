@@ -25,12 +25,14 @@ const sourceSchema = z.object({
   }, {
     message: "Configure either a ZIP code or both city and state",
   }),
+  untera: z.object({}).optional(),
   optOutInstructions: z.string().trim().max(1000).optional(),
 }).superRefine((value, context) => {
-  if (value.sourceType === "public_api" && !value.rentcast) {
-    context.addIssue({ code: "custom", path: ["rentcast"], message: "RentCast search settings are required for public API sources" });
+  const apiConfigCount = Number(Boolean(value.rentcast)) + Number(Boolean(value.untera));
+  if (value.sourceType === "public_api" && apiConfigCount !== 1) {
+    context.addIssue({ code: "custom", path: ["rentcast"], message: "Select exactly one public API provider configuration" });
   }
-  if (value.sourceType !== "public_api" && value.rentcast) {
+  if (value.sourceType !== "public_api" && apiConfigCount > 0) {
     context.addIssue({ code: "custom", path: ["rentcast"], message: "Provider settings are only supported for public API sources" });
   }
 });
@@ -66,13 +68,18 @@ export async function POST(request: Request) {
   const manual = parsed.data.sourceType === "manual";
   const apiSource = parsed.data.sourceType === "public_api";
   const ingestionToken = manual || apiSource ? null : randomBytes(32).toString("base64url");
-  const configuration = apiSource ? { provider: "rentcast", ...parsed.data.rentcast } : {};
+  const provider = parsed.data.untera ? "untera" : parsed.data.rentcast ? "rentcast" : null;
+  const configuration = provider === "untera"
+    ? { provider }
+    : provider === "rentcast"
+      ? { provider, ...parsed.data.rentcast }
+      : {};
   const { data, error } = await supabase.from("listing_sources").insert({
     organization_id: member.organization_id,
     name: parsed.data.name,
     source_key: sourceKey,
     source_type: parsed.data.sourceType,
-    source_url: apiSource ? "https://api.rentcast.io" : parsed.data.sourceUrl ?? null,
+    source_url: apiSource ? provider === "untera" ? "https://api.untera.io" : "https://api.rentcast.io" : parsed.data.sourceUrl ?? null,
     configuration,
     ingestion_token_hash: ingestionToken ? createHash("sha256").update(ingestionToken).digest("hex") : null,
     approved: manual,
@@ -94,12 +101,14 @@ export async function POST(request: Request) {
     return NextResponse.json({
       error: "Source was created but the audit record could not be written; retain the token below and resolve the audit issue before enabling the source",
       data,
-      ...(apiSource ? { setupInstructions: "Configure RENTCAST_API_KEY on the server, then an owner/admin must approve the source. Scheduled sync runs at most once per source every 24 hours." } : {}),
+      ...(apiSource && provider === "rentcast" ? { setupInstructions: "Configure RENTCAST_API_KEY on the server, then an owner/admin must approve the source. Scheduled sync runs at most once per source every 24 hours." } : {}),
+      ...(apiSource && provider === "untera" ? { setupInstructions: "Configure UNTERA_API_KEY and confirm commercial-use and listing-reuse authorization on the server. An owner/admin must approve this source before live search." } : {}),
       ...(ingestionToken ? { ingestionToken } : {}),
     }, { status: 500 });
   }
   return NextResponse.json({
     data,
+    ...(apiSource && provider === "untera" ? { setupInstructions: "Configure UNTERA_API_KEY and confirm commercial-use and listing-reuse authorization on the server. An owner/admin must approve this source before live search." } : {}),
     ...(ingestionToken ? { ingestionToken, tokenInstructions: "Copy this token now; it is shown only once. Configure it as the Bearer credential in the approved source or n8n." } : {}),
   }, { status: 201 });
 }

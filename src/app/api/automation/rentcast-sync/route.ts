@@ -173,6 +173,7 @@ export async function POST(request: Request) {
           posterType: "UNKNOWN" as const,
           posterEvidence: "RentCast provides listing-agent/office contact fields, which do not establish the identity of the property poster.",
           posterMethod: "source_metadata" as const,
+          imageUrls: [],
           firstSeenAt: optionalListingDate(item.listingDate),
           publishedAt: optionalListingDate(item.listingDate),
           privateDetails: contactDetails(item),

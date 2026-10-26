@@ -27,6 +27,10 @@ export const listingBaseSchema = z.object({
   posterConfidence: z.number().int().min(0).max(100).optional(),
   posterEvidence: z.string().trim().max(1000).optional(),
   posterMethod: z.enum(["source_metadata", "owner_submission", "manual_review"]).default("manual_review"),
+  imageUrls: z.array(z.string().url().max(2048).refine((value) => {
+    const parsed = new URL(value);
+    return parsed.protocol === "https:" && !parsed.username && !parsed.password;
+  }, "Image URLs must use HTTPS and must not contain credentials")).max(20).default([]),
   publicContactContext: z.string().trim().max(500).optional(),
   firstSeenAt: z.coerce.date().optional(),
   publishedAt: z.coerce.date().optional(),
@@ -107,6 +111,7 @@ export function normalizeListing(input: ListingInput) {
     posterConfidence: input.posterConfidence ?? (input.posterType === "UNKNOWN" ? null : 25),
     posterEvidence: input.posterEvidence ?? null,
     posterMethod: input.posterMethod,
+    imageUrls: input.imageUrls,
     publishedAt: input.publishedAt?.toISOString() ?? input.firstSeenAt?.toISOString() ?? null,
     listingUpdatedAt: input.listingUpdatedAt?.toISOString() ?? null,
     firstSeenAt: input.firstSeenAt?.toISOString() ?? new Date().toISOString(),

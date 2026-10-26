@@ -58,7 +58,7 @@ export async function GET(request: Request) {
   if (!filters.success) return NextResponse.json({ error: "Invalid listing filters", details: filters.error.flatten() }, { status: 400 });
 
   let query = supabase.from("listings")
-    .select("id,title,summary,description,property_type,listing_type,area,city,region,country_code,price,currency,bedrooms,bathrooms,owner_led_claim,poster_type,poster_confidence,poster_evidence,poster_method,has_public_contact,has_contact_information,published_at,listing_updated_at,last_seen_at,status,first_seen_at,created_at,source_id,owners(verification_status),listing_sources(name),listing_source_links(canonical_url,source_name,attribution,last_seen_at)")
+    .select("id,title,summary,description,property_type,listing_type,area,city,region,country_code,price,currency,bedrooms,bathrooms,image_urls,owner_led_claim,poster_type,poster_confidence,poster_evidence,poster_method,has_public_contact,has_contact_information,published_at,listing_updated_at,last_seen_at,status,first_seen_at,created_at,source_id,owners(verification_status),listing_sources(name),listing_source_links(canonical_url,source_name,attribution,last_seen_at)")
     .eq("organization_id", member.organization_id)
     .is("suppressed_at", null);
   const values = filters.data;
@@ -145,7 +145,7 @@ export async function POST(request: Request) {
   const sourceKey = input.sourceName.toLocaleLowerCase("en").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
   let { data: source, error: sourceError } = await supabase
     .from("listing_sources")
-    .select("id,source_type,source_url,approved,active")
+    .select("id,source_type,source_url,configuration,approved,active")
     .eq("organization_id", member.organization_id)
     .eq("source_key", sourceKey)
     .maybeSingle();
@@ -159,7 +159,7 @@ export async function POST(request: Request) {
       approved: true,
       active: true,
       created_by: user.id,
-    }).select("id,source_type,source_url,approved,active").single();
+    }).select("id,source_type,source_url,configuration,approved,active").single();
     source = created.data;
     sourceError = created.error;
   }
@@ -167,7 +167,8 @@ export async function POST(request: Request) {
   if (!source.active || !source.approved || source.source_type !== input.sourceType) {
     return NextResponse.json({ error: "This source must be active and approved before it can be used" }, { status: 403 });
   }
-  if (input.sourceUrl && source.source_url && new URL(input.sourceUrl).hostname !== new URL(source.source_url).hostname) {
+  const providerConfig = source.configuration as { provider?: string } | null;
+  if (input.sourceUrl && source.source_url && providerConfig?.provider !== "untera" && new URL(input.sourceUrl).hostname !== new URL(source.source_url).hostname) {
     return NextResponse.json({ error: "Listing URL host does not match the approved source" }, { status: 400 });
   }
 
@@ -265,6 +266,7 @@ export async function POST(request: Request) {
     poster_confidence: normalized.posterConfidence,
     poster_evidence: normalized.posterEvidence,
     poster_method: normalized.posterMethod,
+    image_urls: normalized.imageUrls,
     has_public_contact: false,
     has_contact_information: false,
     published_at: normalized.publishedAt,
@@ -272,7 +274,7 @@ export async function POST(request: Request) {
     last_seen_at: new Date().toISOString(),
     source_url: normalized.sourceUrl,
     first_seen_at: normalized.firstSeenAt,
-  }).select("id,title,summary,property_type,listing_type,area,city,region,country_code,price,currency,bedrooms,bathrooms,owner_led_claim,poster_type,poster_confidence,poster_evidence,poster_method,has_public_contact,has_contact_information,published_at,listing_updated_at,last_seen_at,status,first_seen_at,created_at,source_id").single();
+  }).select("id,title,summary,property_type,listing_type,area,city,region,country_code,price,currency,bedrooms,bathrooms,image_urls,owner_led_claim,poster_type,poster_confidence,poster_evidence,poster_method,has_public_contact,has_contact_information,published_at,listing_updated_at,last_seen_at,status,first_seen_at,created_at,source_id").single();
   if (insertError) {
     if (insertError.code === "23505") {
       const { data: duplicate } = await supabase.from("listings").select("id").eq("organization_id", member.organization_id).eq("dedupe_key", normalized.dedupeKey).maybeSingle();
