@@ -26,8 +26,12 @@ type Match = {
   listing_id: string;
   score: number;
   status: string;
-  listing: Pick<Opportunity, "id" | "title" | "summary" | "property_type" | "area" | "city" | "price" | "currency"> | null;
-  interest: { id: string; status: string } | null;
+  listing: Pick<Opportunity, "id" | "title" | "summary" | "property_type" | "area" | "city" | "price" | "currency" | "owner_led_claim"> | null;
+  interest: {
+    id: string;
+    status: string;
+    purchase: { purchase_type: "sample" | "paid"; status: "sample" | "payment_required" | "checkout_pending" | "paid"; amount_cents: number; currency: string } | null;
+  } | null;
 };
 
 type MatchSuggestion = { id: string; agent_id: string; display_name: string; score: number; reasons: string[] };
@@ -88,6 +92,20 @@ export function OpportunityWorkspace() {
     return () => window.clearTimeout(timer);
   }, [load]);
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("purchase") !== "success") return;
+    const noticeTimer = window.setTimeout(() => {
+      setNotice("Payment completed. Refreshing your lead access; this may take a few seconds.");
+    }, 0);
+    const refreshTimer = window.setTimeout(() => { void load(); }, 2500);
+    window.history.replaceState({}, "", window.location.pathname);
+    return () => {
+      window.clearTimeout(noticeTimer);
+      window.clearTimeout(refreshTimer);
+    };
+  }, [load]);
+
   const visibleOpportunities = useMemo(() => opportunities.filter((item) => {
     const query = search.trim().toLocaleLowerCase("en");
     const matchesSearch = !query || `${item.title} ${item.summary} ${item.city} ${item.area}`.toLocaleLowerCase("en").includes(query);
@@ -102,9 +120,21 @@ export function OpportunityWorkspace() {
     setNotice("");
     const values = new FormData(event.currentTarget);
     const numericPrice = String(values.get("price") ?? "").trim();
+    const ownerLedClaim = values.get("ownerLedClaim") === "on";
+    if (ownerLedClaim && !values.get("sourceUrl")) {
+      setError("Add the original listing or evidence URL for this owner-seller lead.");
+      setSaving(false);
+      return;
+    }
+    if (ownerLedClaim && !values.get("ownerEmail") && !values.get("ownerPhone")) {
+      setError("Add at least one owner contact method (email or phone) before recording an owner-seller lead.");
+      setSaving(false);
+      return;
+    }
     const payload = {
       sourceName: "Manual entry",
       sourceType: "manual",
+      sourceUrl: values.get("sourceUrl") || undefined,
       title: values.get("title"),
       description: values.get("description"),
       propertyType: values.get("propertyType"),
@@ -114,7 +144,7 @@ export function OpportunityWorkspace() {
       countryCode: values.get("countryCode"),
       price: numericPrice ? Number(numericPrice) : undefined,
       currency: values.get("currency"),
-      ownerLedClaim: values.get("ownerLedClaim") === "on",
+      ownerLedClaim,
       privateDetails: {
         address: values.get("address") || undefined,
         ownerName: values.get("ownerName") || undefined,
@@ -190,6 +220,25 @@ export function OpportunityWorkspace() {
       await load();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Unable to submit interest.");
+    }
+  }
+
+  async function purchaseLead(match: Match) {
+    if (!match.interest) return;
+    setError("");
+    setNotice("");
+    try {
+      const response = await fetch("/api/lead-purchases/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ interestRequestId: match.interest.id }),
+      });
+      if (!response.ok) throw new Error(await getError(response));
+      const body = await response.json();
+      if (typeof body.data?.checkoutUrl !== "string") throw new Error("Checkout provider did not return a payment link.");
+      window.location.assign(body.data.checkoutUrl);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Unable to start lead checkout.");
     }
   }
 
@@ -348,16 +397,16 @@ export function OpportunityWorkspace() {
   return (
     <>
       <div className="page-heading">
-        <div>        <p className="eyebrow">Workspace / Opportunities</p><h1>Property opportunities</h1><p className="subheading">Review normalized source records and unverified owner-listed claims, then route a privacy-safe summary to a suitable agent.</p></div>
+        <div>        <p className="eyebrow">Workspace / Opportunities</p><h1>Owner-seller leads</h1><p className="subheading">Find actionable properties offered by owners. Seller contact is shared only with the matched agent after manager review and approval.</p></div>
         <button className="primary-button" onClick={() => setFormOpen((open) => !open)}>{formOpen ? "Close form" : "+ Add opportunity"}</button>
       </div>
 
-      <div className="notice-banner"><span>◎</span><div><b>Private details stay locked.</b><p>Agents first receive a location-level summary. Property or owner details are revealed only after agent interest and an explicit workspace approval.</p></div></div>
+      <div className="notice-banner"><span>◎</span><div><b>Prioritize genuine owner sellers.</b><p>RentCast provides listing records and may include listing-agent or office contacts; it does not establish an owner-posted listing or supply owner contact details. Add owner-seller leads from authorized sources with the original listing link and a seller phone or email. Agents see contact details only after interest and manager approval.</p></div></div>
       {error && <div className="workspace-alert error" role="alert">{error}</div>}
       {notice && <div className="workspace-alert success" role="status">{notice}</div>}
 
       {formOpen && <section className="panel opportunity-form-panel">
-        <div className="panel-header"><div><h2>Record a property opportunity</h2><p>Use only sources your organization is permitted to process.</p></div></div>
+        <div className="panel-header"><div><h2>Add an owner-seller lead</h2><p>Prioritize properties the owner is actually offering. Keep the original listing/evidence link and at least one owner contact method so the lead is actionable.</p></div></div>
         <form className="opportunity-form" onSubmit={createOpportunity}>
           <label>Listing title<input name="title" required minLength={3} maxLength={200} placeholder="Detached home near the park" /></label>
           <label>Property type<select name="propertyType" required><option value="house">House</option><option value="apartment">Apartment</option><option value="land">Land</option><option value="commercial">Commercial</option><option value="other">Other</option></select></label>
@@ -368,13 +417,14 @@ export function OpportunityWorkspace() {
           <label>Asking price<input name="price" type="number" min="0.01" step="any" /></label>
           <label>Currency<input name="currency" minLength={3} maxLength={3} defaultValue="USD" /></label>
           <label className="form-span">Description<textarea name="description" rows={3} maxLength={4000} /></label>
-          <label className="checkbox-label form-span"><input type="checkbox" name="ownerLedClaim" /> Source indicates owner-listed (unverified until review)</label>
-          <details className="private-fields form-span"><summary>Optional private details (encrypted at rest, not included in summaries)</summary><div className="private-fields-grid">
+          <label className="form-span">Original listing / evidence URL<input name="sourceUrl" type="url" maxLength={2048} placeholder="https://source.example/listing" /><small>Required when marking this as an owner-seller lead. Use a source your organization is authorized to process.</small></label>
+          <label className="checkbox-label form-span"><input type="checkbox" name="ownerLedClaim" /> Owner is represented as the seller in this source (manager verification still required)</label>
+          <details className="private-fields form-span" open><summary>Private seller contact details (encrypted; revealed only after approval)</summary><div className="private-fields-grid">
             <label>Full address<input name="address" maxLength={500} autoComplete="off" /></label>
             <label>Owner name<input name="ownerName" maxLength={200} autoComplete="off" /></label>
             <label>Owner email<input name="ownerEmail" type="email" maxLength={254} autoComplete="off" /></label>
             <label>Owner phone<input name="ownerPhone" type="tel" maxLength={40} autoComplete="off" /></label>
-          </div><small>Requires OWNER_DATA_ENCRYPTION_KEY. Contact permission starts unknown. Private contacts are not used for automated messages.</small></details>
+          </div><small>Owner-seller leads require at least an email or phone number. Requires OWNER_DATA_ENCRYPTION_KEY. The contact is not shown to agents until their detail request is approved and any applicable lead payment is complete.</small></details>
           <div className="form-actions form-span"><button className="primary-button" disabled={saving}>{saving ? "Saving…" : "Save opportunity"}</button></div>
         </form>
       </section>}
@@ -405,8 +455,26 @@ export function OpportunityWorkspace() {
         {items.length ? <div className="match-suggestion-list">{items.map((item) => <div className="match-suggestion" key={item.agent_id}><div><b>{item.display_name}</b><small>{item.reasons.join(" · ")}</small></div><ScoreBadge score={item.score} /><button className="secondary-button small" disabled={!item.id} onClick={() => void sendAgentEmail(item)}>Send summary email</button></div>)}</div> : <p className="workspace-state">No active agent profile matches this opportunity yet.</p>}
       </section>)}
 
-      {matches.length > 0 && <section className="panel match-panel"><div className="panel-header"><div><h2>Recommended for you</h2><p>Matched summaries only. Request details to enter human review.</p></div></div><div className="match-suggestion-list">
-        {matches.map((match) => <div className="agent-match-row" key={match.id}><div className="agent-match-main"><b>{match.listing?.title ?? "Opportunity"}</b><small>{match.listing?.summary} · Match {match.score}/100</small></div>{match.interest?.status === "approved" ? <button className="primary-button small" onClick={() => void revealDetails(match.listing_id)}>View approved details</button> : match.interest ? <StatusPill tone={match.interest.status === "rejected" ? "neutral" : "amber"}>{match.interest.status === "pending" ? "Awaiting review" : match.interest.status}</StatusPill> : <button className="secondary-button small" onClick={() => void requestInterest(match.id)}>Request details</button>}</div>)}
+      {matches.length > 0 && <section className="panel match-panel"><div className="panel-header"><div><h2>Recommended for you</h2><p>One verified owner-seller sample is free per organization; subsequent verified owner-seller leads cost $25 USD after manager approval.</p></div></div><div className="match-suggestion-list">
+        {matches.map((match) => {
+          const purchase = match.interest?.purchase;
+          const unlockGranted = purchase?.status === "sample" || purchase?.status === "paid";
+          const needsPayment = purchase?.status === "payment_required" || purchase?.status === "checkout_pending";
+          return <div className="agent-match-row" key={match.id}>
+            <div className="agent-match-main"><b>{match.listing?.title ?? "Opportunity"}</b><small>{match.listing?.summary} · Match {match.score}/100{match.listing?.owner_led_claim ? " · Owner-seller lead" : ""}</small></div>
+            {match.interest?.status === "approved"
+              ? match.listing?.owner_led_claim
+                ? unlockGranted
+                  ? <button className="primary-button small" onClick={() => void revealDetails(match.listing_id)}>{purchase?.purchase_type === "sample" ? "View free sample" : "View purchased lead"}</button>
+                  : needsPayment
+                    ? <button className="primary-button small" onClick={() => void purchaseLead(match)}>{purchase?.status === "checkout_pending" ? "Continue checkout" : `Unlock for $${(purchase?.amount_cents ?? 2500) / 100}`}</button>
+                    : <StatusPill tone="amber">Lead access being prepared</StatusPill>
+                : <button className="primary-button small" onClick={() => void revealDetails(match.listing_id)}>View approved details</button>
+              : match.interest
+                ? <StatusPill tone={match.interest.status === "rejected" ? "neutral" : "amber"}>{match.interest.status === "pending" ? "Awaiting review" : match.interest.status}</StatusPill>
+                : <button className="secondary-button small" onClick={() => void requestInterest(match.id)}>Request verified lead</button>}
+          </div>;
+        })}
       </div></section>}
 
       {details && <div className="details-overlay" role="presentation" onClick={() => setDetails(null)}><section className="details-dialog" role="dialog" aria-modal="true" aria-labelledby="details-heading" onClick={(event) => event.stopPropagation()}><div className="panel-header"><div><p className="eyebrow">Approved access</p><h2 id="details-heading">Private property details</h2></div><button className="secondary-button small" onClick={() => setDetails(null)}>Close</button></div><dl>{Object.entries(details).filter(([, value]) => Boolean(value)).map(([key, value]) => <div key={key}><dt>{key.replace(/([A-Z])/g, " $1").replace(/^./, (letter) => letter.toUpperCase())}</dt><dd>{value}</dd></div>)}</dl><small>Access to these details was recorded in the workspace audit log.</small></section></div>}

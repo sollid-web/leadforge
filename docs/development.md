@@ -32,7 +32,7 @@ supabase link --project-ref YOUR_PROJECT_REF
 supabase db push
 ```
 
-Alternatively, run the files under [`supabase/migrations`](../supabase/migrations/) in timestamp order in the Supabase SQL editor. The first migration contains the current organization and legacy inbound-lead tables; the second adds the opportunity workflow and RLS rules; the third grants API-role table privileges; the fourth adds RentCast search configuration and safe sync claiming; the fifth adds manager-confirmed contact inquiries, permission evidence, and opt-out tracking.
+Alternatively, run the files under [`supabase/migrations`](../supabase/migrations/) in timestamp order in the Supabase SQL editor. The first migration contains the current organization and legacy inbound-lead tables; the second adds the opportunity workflow and RLS rules; the third grants API-role table privileges; the fourth adds RentCast search configuration and safe sync claiming; later migrations add manager-confirmed contact inquiries and verified-lead purchase entitlements.
 
 With a running local Supabase stack, apply pending migration files with:
 
@@ -57,6 +57,12 @@ Schedule an authenticated daily POST to `/api/automation/rentcast-sync`. Each ap
 ## Manual contact inquiries
 
 The opportunity workspace provides a manager-only **Contact** action for an encrypted listing-agent, listing-office, or verified-owner email when one is available. Before sending, the manager records the permission or applicable lawful basis and evidence reference, composes a property-specific message, and confirms that individual send. Owner email also requires a verified owner and a permitted owner-contact record. A contact's opt-out blocks future outreach; outgoing messages include an opt-out link. Duplicate messages are limited to one per contact/listing in seven days, with a workspace limit of 20 messages per 24 hours. This is not a campaign tool and does not make a legal determination on the user's behalf.
+
+## Verified lead sample and purchase
+
+An owner-seller lead must include its original listing/evidence URL and at least one seller email or phone. A manager verifies the claim with an evidence reference and rationale. RentCast does not establish owner-posted status or provide owner contact fields; its contacts remain categorized as listing agent/office.
+
+After an agent requests a verified owner-seller lead and a manager approves it, the organization receives one free sample unlock. Further approved leads cost **$25 USD each**. Checkout uses Stripe Checkout; set `STRIPE_SECRET_KEY`, then configure a Stripe webhook pointing to `/api/stripe/webhook` with `checkout.session.completed` and `checkout.session.expired` events and set its signing secret as `STRIPE_WEBHOOK_SECRET`. For local tests, use Stripe test keys and `stripe listen --forward-to localhost:3000/api/stripe/webhook`. A signed `checkout.session.completed` event is required to unlock the paid contact; redirecting back from Checkout alone does not grant access. Test with a non-production workspace and Stripe test mode before setting live keys. Refunds, subscriptions, and seller payouts are not implemented.
 
 ## Safe source testing
 
@@ -103,6 +109,7 @@ pnpm build
 - After setting `RENTCAST_API_KEY` and approving a search, schedule a daily authenticated request to `/api/automation/rentcast-sync`.
 - Configure Auth email, redirect URLs, and verified-email policy.
 - Review all source approvals and user opt-out rules before enabling ingestion.
+- For paid lead unlocks, configure Stripe secret keys and the signed webhook endpoint, then test both the free organization sample and a subsequent $25 USD test-mode purchase.
 - Keep n8n disabled until its inbound authentication and source-scoped outbound bearer credential are configured.
 - Set up database backups, security monitoring, retention rules, and a key recovery/rotation plan.
 - Verify `/api/health` and live product routes after deployment; `/api/health` confirms environment configuration only, not a successful database query.

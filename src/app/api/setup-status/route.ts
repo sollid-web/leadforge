@@ -9,6 +9,7 @@ export async function GET() {
       ownerDataEncryption: Boolean(process.env.OWNER_DATA_ENCRYPTION_KEY),
       rentcast: Boolean(process.env.RENTCAST_API_KEY),
       scheduledJobs: Boolean(process.env.CRON_SECRET),
+      stripeLeadPayments: Boolean(process.env.STRIPE_SECRET_KEY && process.env.STRIPE_WEBHOOK_SECRET),
     },
   }, { headers: { "Cache-Control": "no-store" } });
 }

@@ -21,7 +21,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (membershipError) return NextResponse.json({ error: "Unable to check organization permissions" }, { status: 500 });
   if (!member) return NextResponse.json({ error: "Manager permission required" }, { status: 403 });
   const { data: listing, error: listingError } = await supabase.from("listings")
-    .select("id,owner_led_claim")
+    .select("id,owner_led_claim,source_url")
     .eq("id", id)
     .eq("organization_id", member.organization_id)
     .maybeSingle();
@@ -29,6 +29,26 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (!listing) return NextResponse.json({ error: "Opportunity not found" }, { status: 404 });
   if (!listing.owner_led_claim && parsed.data.status === "verified") {
     return NextResponse.json({ error: "The source does not claim owner-listed status" }, { status: 409 });
+  }
+  if (parsed.data.status === "verified" && !listing.source_url) {
+    return NextResponse.json({ error: "A source listing or evidence URL must be recorded before verifying an owner-seller lead" }, { status: 409 });
+  }
+  if (parsed.data.status === "verified") {
+    const { data: owner, error: ownerError } = await supabase.from("owners")
+      .select("id")
+      .eq("organization_id", member.organization_id)
+      .eq("listing_id", listing.id)
+      .maybeSingle();
+    if (ownerError) return NextResponse.json({ error: "Unable to validate the seller contact record" }, { status: 500 });
+    if (!owner) return NextResponse.json({ error: "Add an owner email or phone before verifying this seller lead" }, { status: 409 });
+    const { data: ownerContact, error: contactError } = await supabase.from("owner_contacts")
+      .select("id")
+      .eq("organization_id", member.organization_id)
+      .eq("owner_id", owner.id)
+      .limit(1)
+      .maybeSingle();
+    if (contactError) return NextResponse.json({ error: "Unable to validate the seller contact record" }, { status: 500 });
+    if (!ownerContact) return NextResponse.json({ error: "Add an owner email or phone before verifying this seller lead" }, { status: 409 });
   }
 
   const { error: ownerError } = await supabase.from("owners").upsert({

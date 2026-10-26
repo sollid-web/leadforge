@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 
-export const listingInputSchema = z.object({
+export const listingBaseSchema = z.object({
   sourceName: z.string().trim().min(2).max(120).default("Manual entry"),
   sourceType: z.enum(["manual", "approved_feed", "partner_feed", "public_api"]).default("manual"),
   sourceUrl: z.string().url().max(2048).refine((value) => {
@@ -33,6 +33,17 @@ export const listingInputSchema = z.object({
     listingOfficePhone: z.string().trim().max(40).optional(),
     notes: z.string().trim().max(2000).optional(),
   }).optional(),
+});
+
+export const listingInputSchema = listingBaseSchema.superRefine((input, context) => {
+  if (input.sourceType === "manual" && input.ownerLedClaim) {
+    if (!input.sourceUrl) {
+      context.addIssue({ code: "custom", path: ["sourceUrl"], message: "Owner-seller leads need a source URL or evidence link" });
+    }
+    if (!input.privateDetails?.ownerEmail && !input.privateDetails?.ownerPhone) {
+      context.addIssue({ code: "custom", path: ["privateDetails"], message: "Owner-seller leads need at least one owner email or phone number" });
+    }
+  }
 });
 
 export type ListingInput = z.infer<typeof listingInputSchema>;

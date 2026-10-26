@@ -31,6 +31,15 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   if (interest.status !== "pending") return NextResponse.json({ error: "This interest request has already been decided" }, { status: 409 });
 
   const status = parsed.data.decision;
+  if (status === "approved") {
+    const { data: accessStatus, error: accessError } = await supabase.rpc("prepare_owner_lead_access", {
+      target_interest: interest.id,
+    });
+    if (accessError) return NextResponse.json({ error: "Unable to prepare verified lead access" }, { status: 500 });
+    if (accessStatus === "verification_required") {
+      return NextResponse.json({ error: "Verify the owner-seller claim before approving access" }, { status: 409 });
+    }
+  }
   const { error: approvalError } = await supabase.from("approvals").upsert({
     organization_id: member.organization_id,
     interest_request_id: interest.id,

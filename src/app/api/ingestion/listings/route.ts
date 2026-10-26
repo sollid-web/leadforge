@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
-import { listingInputSchema, normalizeListing, scoreListing } from "@/lib/opportunities";
+import { listingBaseSchema, normalizeListing, scoreListing } from "@/lib/opportunities";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
-const publicFeedSchema = listingInputSchema.omit({ privateDetails: true });
+const publicFeedSchema = listingBaseSchema.omit({ privateDetails: true });
 
 function bearerToken(request: Request) {
   const authorization = request.headers.get("authorization");

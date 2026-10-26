@@ -22,20 +22,29 @@ export async function GET() {
   if (error) return NextResponse.json({ error: "Unable to load agent matches" }, { status: 500 });
   const listingIds = (matches ?? []).map((match) => match.listing_id);
   const { data: listings, error: listingError } = listingIds.length
-    ? await supabase.from("listings").select("id,title,summary,property_type,area,city,price,currency").in("id", listingIds)
+    ? await supabase.from("listings").select("id,title,summary,property_type,area,city,price,currency,owner_led_claim").in("id", listingIds)
     : { data: [], error: null };
   if (listingError) return NextResponse.json({ error: "Unable to load matched opportunity summaries" }, { status: 500 });
   const { data: interests, error: interestError } = matches?.length
     ? await supabase.from("interest_requests").select("id,match_id,status").in("match_id", matches.map((match) => match.id))
     : { data: [], error: null };
   if (interestError) return NextResponse.json({ error: "Unable to load interest request status" }, { status: 500 });
+  const interestIds = (interests ?? []).map((interest) => interest.id);
+  const { data: purchases, error: purchaseError } = interestIds.length
+    ? await supabase.from("lead_purchases").select("interest_request_id,purchase_type,status,amount_cents,currency").in("interest_request_id", interestIds)
+    : { data: [], error: null };
+  if (purchaseError) return NextResponse.json({ error: "Unable to load lead purchase status" }, { status: 500 });
   const listingById = new Map((listings ?? []).map((listing) => [listing.id, listing]));
   const interestByMatch = new Map((interests ?? []).map((interest) => [interest.match_id, interest]));
+  const purchaseByInterest = new Map((purchases ?? []).map((purchase) => [purchase.interest_request_id, purchase]));
   return NextResponse.json({
     data: (matches ?? []).map((match) => ({
       ...match,
       listing: listingById.get(match.listing_id) ?? null,
-      interest: interestByMatch.get(match.id) ?? null,
+      interest: (() => {
+        const interest = interestByMatch.get(match.id);
+        return interest ? { ...interest, purchase: purchaseByInterest.get(interest.id) ?? null } : null;
+      })(),
     })),
   }, { headers: { "Cache-Control": "private, no-store" } });
 }
