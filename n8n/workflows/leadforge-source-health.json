@@ -1,0 +1,79 @@
+{
+  "name": "LeadForge / Source Health Monitor (DISABLED)",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 6
+            }
+          ]
+        }
+      },
+      "id": "b2762c3c-0ad4-4faa-a991-a891edb00001",
+      "name": "Every 6 hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [260, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR-LEADFORGE-APP.example/api/automation/source-health",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "b2762c3c-0ad4-4faa-a991-a891edb00002",
+      "name": "Recalculate source health",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [520, 300],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 30000,
+      "notesInFlow": true,
+      "notes": "Before activation replace the URL and attach the n8n credential named LeadForge CRON Bearer (Authorization: Bearer <CRON_SECRET>). The app currently measures time since last successful ingestion, not live provider reachability."
+    }
+  ],
+  "connections": {
+    "Every 6 hours": {
+      "main": [
+        [
+          {
+            "node": "Recalculate source health",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "none",
+    "saveDataSuccessExecution": "none",
+    "executionTimeout": 120
+  },
+  "pinData": {},
+  "tags": [],
+  "meta": {
+    "status": "disabled-template",
+    "requires": [
+      "LeadForge deployment with CRON_SECRET and Supabase service role configured",
+      "n8n HTTP Header Auth credential named LeadForge CRON Bearer"
+    ],
+    "safety": "Read/health metadata only; no provider collection, outreach, payment, or delivery. Workflow is intentionally inactive."
+  }
+}

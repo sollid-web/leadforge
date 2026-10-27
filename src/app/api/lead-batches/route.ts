@@ -21,7 +21,7 @@ export async function GET(request: Request) {
   const ids = (batches ?? []).map((batch) => batch.id);
   const [{ data: items, error: itemError }, { data: offers, error: offerError }] = await Promise.all([
     ids.length ? admin.from("lead_batch_items").select("batch_id,listing_id").eq("organization_id", organizationId).in("batch_id", ids) : Promise.resolve({ data: [], error: null }),
-    ids.length ? admin.from("lead_offers").select("id,batch_id,status,price_cents,currency,agent_directory_id,created_at").eq("organization_id", organizationId).in("batch_id", ids) : Promise.resolve({ data: [], error: null }),
+    ids.length ? admin.from("lead_offers").select("id,batch_id,status,price_minor_units,currency,agent_directory_id,created_at").eq("organization_id", organizationId).in("batch_id", ids) : Promise.resolve({ data: [], error: null }),
   ]);
   if (itemError || offerError) return NextResponse.json({ error: "Unable to load batch contents" }, { status: 500 });
   return NextResponse.json({ data: (batches ?? []).map((batch) => ({

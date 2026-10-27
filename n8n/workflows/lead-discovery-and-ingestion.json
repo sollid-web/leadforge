@@ -1,88 +1,106 @@
 {
-  "name": "EstatelQ / Approved listing ingestion",
+  "name": "LeadForge / Approved Public Listing Intake (DISABLED)",
   "active": false,
   "nodes": [
     {
-      "name": "Approved source webhook",
-      "type": "n8n-nodes-base.webhook",
       "parameters": {
         "httpMethod": "POST",
-        "path": "estatelq/approved-listing",
+        "path": "leadforge/approved-listing",
         "authentication": "headerAuth",
-        "responseMode": "responseNode"
-      }
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": false
+        }
+      },
+      "id": "7f6b19d1-5e89-4779-a10b-5525f0000001",
+      "name": "Approved feed webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [240, 300],
+      "notesInFlow": true,
+      "notes": "Attach a dedicated partner-ingress Header Auth credential after import. Do not reuse the LeadForge CRON or per-source ingestion credential."
     },
     {
-      "name": "Validate public summary",
-      "type": "n8n-nodes-base.code",
       "parameters": {
-        "jsCode": "const payload = $json.body ?? $json;\nconst required = ['title', 'propertyType', 'area', 'city', 'countryCode', 'sourceType'];\nfor (const key of required) {\n  if (!payload[key]) throw new Error(`Missing required listing field: ${key}`);\n}\nif (payload.privateDetails) throw new Error('Private owner/property details are not accepted by this webhook');\nif (!['approved_feed', 'partner_feed', 'public_api'].includes(payload.sourceType)) throw new Error('Source type is not an approved automated source');\nreturn [{ json: payload }];"
-      }
+        "jsCode": "const payload = $json.body ?? $json;\nconst required = ['title', 'propertyType', 'area', 'city', 'countryCode', 'sourceType'];\nfor (const key of required) {\n  if (typeof payload[key] !== 'string' || !payload[key].trim()) throw new Error(`Missing required public listing field: ${key}`);\n}\nif (Object.hasOwn(payload, 'privateDetails') || Object.hasOwn(payload, 'ownerContact') || Object.hasOwn(payload, 'sellerContact')) {\n  throw new Error('Private owner/property contact fields are not accepted');\n}\nif (!['approved_feed', 'partner_feed', 'public_api'].includes(payload.sourceType)) throw new Error('Source type is not allowed');\nconst allowed = new Set(['title','summary','description','propertyType','area','city','region','countryCode','price','currency','ownerLedClaim','listingType','bedrooms','bathrooms','posterType','posterEvidence','posterMethod','imageUrls','sourceUrl','externalId','publishedAt','listingUpdatedAt','firstSeenAt','sourceType']);\nconst clean = Object.fromEntries(Object.entries(payload).filter(([key]) => allowed.has(key)));\nreturn [{ json: clean }];"
+      },
+      "id": "7f6b19d1-5e89-4779-a10b-5525f0000002",
+      "name": "Allowlist public listing summary",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [500, 300]
     },
     {
-      "name": "EstatelQ ingestion API",
-      "type": "n8n-nodes-base.httpRequest",
       "parameters": {
         "method": "POST",
-        "url": "={{$env.ESTATELQ_BASE_URL}}/api/ingestion/listings",
+        "url": "https://YOUR-LEADFORGE-APP.example/api/ingestion/listings",
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ $json }}"
-      }
+        "jsonBody": "={{ $json }}",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "7f6b19d1-5e89-4779-a10b-5525f0000003",
+      "name": "LeadForge source-token ingestion",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [760, 300],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 30000,
+      "notesInFlow": true,
+      "notes": "Before activation set the LeadForge URL and attach the separate n8n Header Auth credential containing the one-time bearer token for exactly one approved, active LeadForge source. Ingestion is idempotent/deduplicated by LeadForge; confirm source host and data-use authorization first."
     },
     {
-      "name": "Respond to source",
-      "type": "n8n-nodes-base.respondToWebhook",
       "parameters": {
         "respondWith": "json",
-        "responseBody": "={{ JSON.stringify({ ok: true, result: $json, execution_id: $execution.id }) }}"
-      }
+        "responseBody": "={{ JSON.stringify({ ok: true, result: $json, execution_id: $execution.id }) }}",
+        "options": {
+          "responseCode": 200
+        }
+      },
+      "id": "7f6b19d1-5e89-4779-a10b-5525f0000004",
+      "name": "Respond with ingest result",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1020, 300]
     }
   ],
   "connections": {
-    "Approved source webhook": {
-      "main": [
-        [
-          {
-            "node": "Validate public summary",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+    "Approved feed webhook": {
+      "main": [[{"node": "Allowlist public listing summary", "type": "main", "index": 0}]]
     },
-    "Validate public summary": {
-      "main": [
-        [
-          {
-            "node": "EstatelQ ingestion API",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+    "Allowlist public listing summary": {
+      "main": [[{"node": "LeadForge source-token ingestion", "type": "main", "index": 0}]]
     },
-    "EstatelQ ingestion API": {
-      "main": [
-        [
-          {
-            "node": "Respond to source",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
+    "LeadForge source-token ingestion": {
+      "main": [[{"node": "Respond with ingest result", "type": "main", "index": 0}]]
     }
   },
   "settings": {
-    "executionTimeout": 120,
+    "executionOrder": "v1",
     "saveDataErrorExecution": "none",
-    "saveDataSuccessExecution": "none"
+    "saveDataSuccessExecution": "none",
+    "executionTimeout": 120
   },
+  "pinData": {},
+  "tags": [],
   "meta": {
     "status": "disabled-template",
-    "setup": "Configure ESTATELQ_BASE_URL in n8n. Add a Header Auth credential to the inbound webhook. Configure the outbound HTTP Request with the per-source one-time bearer token returned when registering a non-manual source. Deploy and approve the source in EstatelQ before activating this workflow. This workflow does not fetch or scrape listing websites."
+    "requires": [
+      "Dedicated partner-ingress Header Auth credential in n8n",
+      "Dedicated LeadForge per-source ingestion bearer credential in n8n",
+      "A matching approved and active LeadForge feed source with source_url host restrictions"
+    ],
+    "safety": "Accepts public listing summaries only; never accepts owner contact/private property details. No website crawling is performed. Workflow is intentionally inactive."
   }
 }

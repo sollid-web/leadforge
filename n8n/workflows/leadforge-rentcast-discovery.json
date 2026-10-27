@@ -1,0 +1,81 @@
+{
+  "name": "LeadForge / Approved RentCast Discovery (DISABLED)",
+  "active": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 2
+            }
+          ]
+        }
+      },
+      "id": "8f5f5f0c-1518-4ff9-95bf-20a20dbd0001",
+      "name": "Every 2 hours",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [260, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://YOUR-LEADFORGE-APP.example/api/automation/rentcast-sync",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "neverError": false,
+              "responseFormat": "json"
+            }
+          },
+          "timeout": 30000
+        }
+      },
+      "id": "8f5f5f0c-1518-4ff9-95bf-20a20dbd0002",
+      "name": "Run one approved RentCast sync",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [520, 300],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 30000,
+      "notesInFlow": true,
+      "notes": "Before activation replace the URL and attach the n8n credential named LeadForge CRON Bearer (Authorization: Bearer <CRON_SECRET>). Each call is bounded by the app to one provider request; the route rotates eligible sources and enforces a per-source 24-hour claim."
+    }
+  ],
+  "connections": {
+    "Every 2 hours": {
+      "main": [
+        [
+          {
+            "node": "Run one approved RentCast sync",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveDataErrorExecution": "none",
+    "saveDataSuccessExecution": "none",
+    "executionTimeout": 120
+  },
+  "pinData": {},
+  "tags": [],
+  "meta": {
+    "status": "disabled-template",
+    "requires": [
+      "LeadForge deployment with Supabase and encryption configured",
+      "An approved and active RentCast source with valid source configuration",
+      "RentCast API credentials and contractual authorization in the LeadForge server environment",
+      "n8n HTTP Header Auth credential named LeadForge CRON Bearer"
+    ],
+    "safety": "No scraping, email, offer, payment, or delivery action is performed by this workflow. Workflow is intentionally inactive."
+  }
+}
