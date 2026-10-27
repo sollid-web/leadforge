@@ -97,6 +97,14 @@ export async function storeSubmittedContacts(input: {
         phone: input.privateDetails.listingOfficePhone,
       },
     },
+    {
+      contactType: "other",
+      contact: {
+        name: input.privateDetails.otherContactName,
+        email: input.privateDetails.otherContactEmail,
+        phone: input.privateDetails.otherContactPhone,
+      },
+    },
   ];
   for (const group of groups) {
     if (!group.contact.name && !group.contact.email && !group.contact.phone) continue;

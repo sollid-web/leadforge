@@ -1,0 +1,23 @@
+# LeadForge Agent Sales Pipeline — Implementation Plan
+
+## Scope and constraints
+
+Build the smallest real operator-led property-to-buyer workflow on top of the existing `listings`, `listing_sources`, `listing_source_links`, `listing_contacts`, `agents`, `agent_profiles`, `matches`, `interest_requests`, `approvals`, `lead_purchases`, audit, and Supabase-auth tables. Do not create another property database, fake buyer/payment activity, send messages, call property sites, or run enrichment/skip-tracing. Continue to use the existing preview-first CSV bridge as the authorized import/fallback.
+
+The inspected LeadForge base is commit `3654575`. The prior local changes add a tested legacy scraper CSV preview/mapping bridge; preserve these changes. The scraper repository is at `34504e1`; its `scraper.py` ends midway through `main()` and cannot run. The old output CSV also represents a different site/source generation than the current v4 code. We will repair syntax/orchestration only if it can be done without executing network collection, and keep collection opt-in, source-authorized, and outside Next.js requests.
+
+## Implementation sequence
+
+1. **Agent directory:** add an organization-scoped external agent/buyer directory separate from login-bound `agents`; support operator-created records, CSV import template, source/provenance, preference/status/follow-up fields, contact encryption, opt-out, and manual interaction history. Do not claim a live public directory integration.
+2. **Qualification and matching:** add pure qualification/matching functions and tests. Require exact country/currency and city or explicitly configured service-area match; exclude ambiguous locations, suppressed, stale, malformed-source-URL, or already sold records. Explain scores/factors. Require operator review for inferred geography.
+3. **Batches and offers:** add only junction/transaction tables referencing existing listing UUIDs. A batch is not ready merely because it has rows: enforce at least 20 qualified, fresh, same-city/country listings to become reviewable. Permit draft batches below threshold for QA; never call them ready. Record exclusivity/shared disclosure. Compose factual, copy-ready messages from the persisted batch summary and agent profile; require human approval and manual sending.
+4. **Sales and delivery:** persist offer transitions and history. Use database constraints/RPC transactions for valid state transitions and exclusivity; record manual payment reconciliation only with amount, currency, reference, evidence note, actor, and timestamp. The UI must state manual reconciliation is not a payment-provider verification. Reveal batch details only to the authenticated buyer account explicitly linked to the agent directory record, and only after paid status; managers retain operations access. Export only authorized purchased records.
+5. **Metrics:** derive dashboard numbers from persisted listings, directory records, offer events, verified manual sales, and deliveries. Return zero for actual empty counts and null/unavailable where not safely computable.
+6. **Scraper worker:** repair only syntax/CLI boundaries and test offline parsing. Add a separate worker/container adapter contract with limits, stable run IDs, status/error reporting and idempotent output handoff. Keep current third-party website source adapters disabled unless source permission is configured; stop on block/challenge responses; never call enrichment or skip-tracing automatically. Do not run a collection during implementation.
+7. **Verification:** unit tests for mapping, qualification, geographic matching, state transitions and exclusivity; run lint, `tsc`, tests, and build. No live Supabase or end-to-end authenticated buyer transaction can be claimed unless deployment credentials/test tenant are explicitly available; document this as a deployment/integration test requirement.
+
+## Acceptance and boundaries
+
+The local implementation should support a manager to add/import an agent, create a batch from real existing listing UUIDs, view explainable same-market agent matches, compose and approve a truthful offer, record that it was manually sent and a response received, record a manually reconciled payment with evidence fields, and permit only the linked authenticated buyer to retrieve a paid batch. Database migrations and RLS/RPC rules are part of the feature, not optional UI behavior.
+
+External email/messaging, Stripe payment, public agent-directory discovery, production worker hosting/secrets, and real scraper source collection remain disabled until their credentials, terms, and authorization are configured and tested.

@@ -382,17 +382,17 @@ export async function POST(request: Request) {
         });
         if (contactError) return NextResponse.json({ error: "Private details stored but encrypted owner contact could not be created" }, { status: 500 });
       }
-      const contacts = await storeSubmittedContacts({
-        supabase,
-        organizationId: member.organization_id,
-        listingId: listing.id,
-        sourceId: source.id,
-        sourceUrl: normalized.sourceUrl,
-        publicContactContext: input.publicContactContext,
-        privateDetails: input.privateDetails,
-      });
-      if (contacts.error) return NextResponse.json({ error: "Private details stored but contact provenance could not be saved" }, { status: 500 });
     }
+    const contacts = await storeSubmittedContacts({
+      supabase,
+      organizationId: member.organization_id,
+      listingId: listing.id,
+      sourceId: source.id,
+      sourceUrl: normalized.sourceUrl,
+      publicContactContext: input.publicContactContext,
+      privateDetails: input.privateDetails,
+    });
+    if (contacts.error) return NextResponse.json({ error: "Private details stored but contact provenance could not be saved" }, { status: 500 });
   }
 
   try {

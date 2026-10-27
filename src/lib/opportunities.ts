@@ -46,6 +46,9 @@ export const listingBaseSchema = z.object({
     listingOfficeName: z.string().trim().max(200).optional(),
     listingOfficeEmail: z.string().trim().email().max(254).optional(),
     listingOfficePhone: z.string().trim().max(40).optional(),
+    otherContactName: z.string().trim().max(200).optional(),
+    otherContactEmail: z.string().trim().email().max(254).optional(),
+    otherContactPhone: z.string().trim().max(40).optional(),
     notes: z.string().trim().max(2000).optional(),
   }).optional(),
 });

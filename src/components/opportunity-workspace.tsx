@@ -3,7 +3,8 @@
 import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { ScoreBadge, StatusPill } from "@/components/dashboard-shell";
 import { UnteraDiscovery } from "@/components/untera-discovery";
-import { parseCsv } from "@/lib/listing-csv";
+import { parseCsv, parseCsvRecords } from "@/lib/listing-csv";
+import { hasLegacyScraperHeaders, mapScraperCsvRow } from "@/lib/scraper-csv";
 
 type Opportunity = {
   id: string;
@@ -63,7 +64,31 @@ type Match = {
 };
 
 type MatchSuggestion = { id: string; agent_id: string; display_name: string; score: number; reasons: string[] };
-type SourceOption = { id: string; name: string };
+type SourceOption = {
+  id: string;
+  name: string;
+  source_type: string;
+  source_url: string | null;
+  approved: boolean;
+  active: boolean;
+};
+type CsvPreviewRow = {
+  rowNumber: number;
+  title: string;
+  city: string;
+  sourceName: string;
+  hasContact: boolean;
+  payload?: Record<string, unknown>;
+  errors: string[];
+  warnings: string[];
+  outcome?: string;
+};
+type CsvPreview = {
+  fileName: string;
+  format: "LeadForge CSV" | "Legacy scraper CSV";
+  rows: CsvPreviewRow[];
+  completed?: boolean;
+};
 type ContactType = "listing_agent" | "listing_office" | "owner";
 type ContactOption = {
   contactType: ContactType;
@@ -107,6 +132,7 @@ export function OpportunityWorkspace() {
   const [saving, setSaving] = useState(false);
   const [importing, setImporting] = useState(false);
   const [importProgress, setImportProgress] = useState("");
+  const [csvPreview, setCsvPreview] = useState<CsvPreview | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [formOpen, setFormOpen] = useState(false);
@@ -259,35 +285,87 @@ export function OpportunityWorkspace() {
       setError("CSV import is limited to 2 MB.");
       return;
     }
-    setImporting(true);
-    setImportProgress("");
     setError("");
     setNotice("");
+    setImportProgress("");
+    setCsvPreview(null);
     try {
-      const rows = parseCsv(await file.text());
-      if (rows.length > 100) throw new Error("CSV import is limited to 100 listings at a time.");
-      let imported = 0;
-      let duplicates = 0;
-      const failures: string[] = [];
-      for (const [index, row] of rows.entries()) {
-        setImportProgress(`Importing ${index + 1} of ${rows.length}…`);
-        const listingType = row.listing_type || "sale";
-        const posterType = row.poster_type || "UNKNOWN";
+      const text = await file.text();
+      const records = parseCsvRecords(text);
+      if (records.length > 100) throw new Error("CSV import is limited to 100 listings at a time.");
+      const headers = Object.keys(records[0] ?? {});
+      const isLegacyScraper = hasLegacyScraperHeaders(headers) && !["property_type", "area", "country_code"].every((header) => headers.includes(header));
+      if (isLegacyScraper) {
+        const rows = records.map((row, index): CsvPreviewRow => {
+          const mapped = mapScraperCsvRow(row, sources);
+          return {
+            rowNumber: index + 2,
+            title: mapped.title || "Untitled listing",
+            city: mapped.city,
+            sourceName: mapped.sourceName,
+            hasContact: mapped.hasContact,
+            payload: mapped.payload as unknown as Record<string, unknown> | undefined,
+            errors: mapped.errors,
+            warnings: mapped.warnings,
+          };
+        });
+        setCsvPreview({ fileName: file.name, format: "Legacy scraper CSV", rows });
+        return;
+      }
+
+      const canonicalRows = parseCsv(text);
+      const rows = canonicalRows.map((row, index): CsvPreviewRow => {
+        const errors: string[] = [];
+        const warnings: string[] = [];
+        const sourceName = row.source_name || "Owner-submitted CSV";
+        const source = sources.find((candidate) => candidate.name.trim().toLocaleLowerCase("en") === sourceName.trim().toLocaleLowerCase("en"));
+        const sourceType = source?.source_type ?? "manual";
+        if (source && (!source.approved || !source.active)) errors.push("The configured LeadForge source is not approved and active.");
+        if (!row.title?.trim()) errors.push("Listing title is missing.");
+        if (!row.area?.trim()) errors.push("Area is missing.");
+        if (!row.city?.trim()) errors.push("City is missing.");
+        const countryCode = row.country_code?.trim().toUpperCase() ?? "";
+        if (!/^[A-Z]{2}$/.test(countryCode)) errors.push("Country code must be a two-letter ISO code; no default country was applied.");
+        const propertyType = row.property_type?.trim().toLowerCase() ?? "";
+        if (!["house", "apartment", "land", "commercial", "other"].includes(propertyType)) errors.push("Property type is missing or invalid.");
+        const listingType = row.listing_type?.trim().toLowerCase() || "sale";
+        if (!["sale", "rental"].includes(listingType)) errors.push("Listing type must be sale or rental.");
+        const posterType = row.poster_type?.trim().toUpperCase() || "UNKNOWN";
+        if (posterType === "OWNER_VERIFIED") errors.push("CSV cannot assert OWNER_VERIFIED; manager verification is required.");
+        if (!["OWNER_UNVERIFIED", "AGENT", "DEVELOPER", "COMPANY", "UNKNOWN"].includes(posterType)) errors.push("Poster classification is invalid.");
+        const currencyByCountry: Record<string, string> = { US: "USD", NG: "NGN", GB: "GBP", CA: "CAD" };
+        const currency = row.currency?.trim().toUpperCase() || currencyByCountry[countryCode] || "";
+        if (!/^[A-Z]{3}$/.test(currency)) errors.push("Currency is missing; add a three-letter ISO currency code.");
+        const price = row.price?.trim() ? Number(row.price.replace(/,/g, "")) : undefined;
+        if (row.price?.trim() && (!Number.isFinite(price) || (price ?? 0) <= 0)) errors.push("Price must be a positive numeric value or left blank.");
+        const sourceUrl = row.source_url?.trim() || undefined;
+        if (sourceUrl && source) {
+          try {
+            if (source.source_url && new URL(sourceUrl).hostname.toLowerCase() !== new URL(source.source_url).hostname.toLowerCase()) {
+              errors.push("Listing URL host does not match the configured source host.");
+            }
+          } catch {
+            errors.push("Source URL is invalid.");
+          }
+        }
+        if (!row.property_type?.trim()) warnings.push("Property type was not supplied.");
+        if (posterType === "OWNER_UNVERIFIED" && !row.poster_evidence?.trim() && !sourceUrl) errors.push("Owner-unverified classification requires source evidence or a source URL.");
+        const hasContact = Boolean(row.owner_name || row.owner_email || row.owner_phone || row.listing_agent_name || row.listing_agent_email || row.listing_agent_phone);
         const payload = {
-          sourceName: row.source_name || "Owner-submitted CSV",
-          sourceType: "manual",
+          sourceName,
+          sourceType,
           externalId: row.external_id || undefined,
-          sourceUrl: row.source_url || undefined,
+          sourceUrl,
           title: row.title,
           description: row.description || undefined,
-          propertyType: row.property_type,
+          propertyType,
           listingType,
           area: row.area,
           city: row.city,
           region: row.region || undefined,
-          countryCode: row.country_code || "NG",
-          price: row.price ? Number(row.price) : undefined,
-          currency: row.currency || ((row.country_code || "NG").toUpperCase() === "NG" ? "NGN" : "USD"),
+          countryCode,
+          price,
+          currency,
           bedrooms: row.bedrooms ? Number(row.bedrooms) : undefined,
           bathrooms: row.bathrooms ? Number(row.bathrooms) : undefined,
           publishedAt: row.published_at || undefined,
@@ -307,25 +385,71 @@ export function OpportunityWorkspace() {
             listingAgentPhone: row.listing_agent_phone || undefined,
           },
         };
+        return {
+          rowNumber: index + 2,
+          title: row.title || "Untitled listing",
+          city: row.city || "",
+          sourceName,
+          hasContact,
+          payload: errors.length ? undefined : payload,
+          errors,
+          warnings,
+        };
+      });
+      setCsvPreview({ fileName: file.name, format: "LeadForge CSV", rows });
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Unable to prepare a CSV preview.");
+    }
+  }
+
+  async function confirmCsvImport() {
+    if (!csvPreview || csvPreview.completed) return;
+    const validRows = csvPreview.rows.filter((row) => row.payload);
+    if (!validRows.length) {
+      setError("No valid rows are ready to import. Review the row-level rejection reasons.");
+      return;
+    }
+    setImporting(true);
+    setError("");
+    setNotice("");
+    let imported = 0;
+    let duplicates = 0;
+    let rejected = csvPreview.rows.length - validRows.length;
+    const outcomes = new Map<number, string>();
+    const failures: string[] = [];
+    try {
+      for (const [index, row] of validRows.entries()) {
+        setImportProgress(`Importing ${index + 1} of ${validRows.length} valid listings…`);
         try {
           const response = await fetch("/api/listings", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
+            body: JSON.stringify(row.payload),
           });
           if (!response.ok) throw new Error(await getError(response));
           const result = await response.json();
-          if (result.duplicate) duplicates += 1;
-          else imported += 1;
+          if (result.duplicate) {
+            duplicates += 1;
+            outcomes.set(row.rowNumber, "Duplicate");
+          } else {
+            imported += 1;
+            outcomes.set(row.rowNumber, "Imported");
+          }
         } catch (reason) {
-          failures.push(`Row ${index + 2}: ${reason instanceof Error ? reason.message : "import failed"}`);
+          rejected += 1;
+          const message = reason instanceof Error ? reason.message : "Import failed";
+          outcomes.set(row.rowNumber, `Rejected: ${message}`);
+          failures.push(`Row ${row.rowNumber}: ${message}`);
         }
       }
       await load();
-      setNotice(`CSV import finished: ${imported} added, ${duplicates} duplicates, ${failures.length} rejected.`);
-      if (failures.length) setError(failures.slice(0, 3).join(" · "));
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Unable to import the CSV.");
+      setCsvPreview((current) => current ? {
+        ...current,
+        completed: true,
+        rows: current.rows.map((row) => ({ ...row, outcome: outcomes.get(row.rowNumber) ?? (row.errors.length ? "Rejected" : undefined) })),
+      } : current);
+      setNotice(`CSV import finished: ${imported} imported, ${duplicates} duplicates, ${rejected} rejected.`);
+      if (failures.length) setError(failures.slice(0, 5).join(" · "));
     } finally {
       setImportProgress("");
       setImporting(false);
@@ -570,6 +694,25 @@ export function OpportunityWorkspace() {
         </div>
       </div>
       {importProgress && <div className="workspace-alert" role="status">{importProgress}</div>}
+
+      {csvPreview && <section className="panel" aria-label="CSV import preview">
+        <div className="panel-header"><div><p className="eyebrow">Import preview</p><h2>{csvPreview.fileName}</h2><p>{csvPreview.format} · {csvPreview.rows.filter((row) => row.payload).length} ready · {csvPreview.rows.filter((row) => row.errors.length > 0).length} rejected · {csvPreview.rows.filter((row) => row.warnings.length > 0).length} with mapping notes</p></div>
+          <button className="secondary-button small" type="button" onClick={() => setCsvPreview(null)} disabled={importing}>{csvPreview.completed ? "Dismiss report" : "Discard preview"}</button>
+        </div>
+        {csvPreview.format === "Legacy scraper CSV" && <p className="form-hint">Legacy scraper rows are accepted only when their source already exists in LeadForge as an approved, active feed/partner source with a matching HTTPS host. Contact fields remain role-unclassified, encrypted, and not consent evidence. This imports a file only; it does not run a website crawler.</p>}
+        <div style={{ maxHeight: 360, overflowY: "auto" }}>
+          {csvPreview.rows.map((row) => <article key={row.rowNumber} className="workspace-state compact" style={{ marginBottom: 8 }}>
+            <h3>Row {row.rowNumber}: {row.title}</h3>
+            <p>{[row.city, row.sourceName].filter(Boolean).join(" · ") || "Source/location not supplied"}{row.hasContact ? " · Contact present (role not verified)" : " · No contact field"}{row.outcome ? ` · ${row.outcome}` : ""}</p>
+            {row.errors.map((message) => <p key={message} role="alert" style={{ color: "#9b3b36" }}>Rejected: {message}</p>)}
+            {row.warnings.map((message) => <p key={message} className="form-hint">Note: {message}</p>)}
+          </article>)}
+        </div>
+        {!csvPreview.completed && <div className="page-heading-actions" style={{ marginTop: 14 }}>
+          <button className="primary-button" type="button" onClick={() => void confirmCsvImport()} disabled={importing || !csvPreview.rows.some((row) => row.payload)}>{importing ? "Importing…" : `Import ${csvPreview.rows.filter((row) => row.payload).length} valid rows`}</button>
+          <span className="form-hint">Duplicates use LeadForge’s existing listing deduplication; rejected rows are not silently dropped.</span>
+        </div>}
+      </section>}
 
       <div className="notice-banner"><span>◎</span><div><b>Prioritize genuine owner sellers.</b><p>RentCast provides listing records and may include listing-agent or office contacts; it does not establish an owner-posted listing or supply owner contact details. Add owner-seller leads from authorized sources with the original listing link and a seller phone or email. Agents see contact details only after interest and manager approval.</p></div></div>
       {error && <div className="workspace-alert error" role="alert">{error}</div>}
