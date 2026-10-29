@@ -8,6 +8,7 @@ import {
   toMinorUnits,
 } from "../src/lib/agent-sales-pipeline.ts";
 import { summarizeOfferConversions } from "../src/lib/sales-metrics.ts";
+import { composeTrialOutreachDraft, eligibleForTrialOutreach } from "../src/lib/trial-outreach.ts";
 
 const today = "2026-10-27T00:00:00.000Z";
 function listing(overrides = {}) {
@@ -23,6 +24,7 @@ function listing(overrides = {}) {
     price: 125000000,
     owner_led_claim: true,
     poster_type: "OWNER_UNVERIFIED",
+    owner_verification_status: "verified",
     source_url: "https://permitted.example/listing/1",
     status: "new",
     has_contact_information: true,
@@ -72,6 +74,8 @@ test("batch qualification retains only fresh owner-indicated, source-backed, exa
     listing({ currency: "USD" }),
     listing({ owner_led_claim: false }),
     listing({ poster_type: "AGENT" }),
+    listing({ id: "unverified-owner", owner_verification_status: "unverified" }),
+    listing({ id: "no-contact", has_contact_information: false }),
     listing({ status: "closed" }),
     listing({ suppressed_at: today }),
     listing({ source_url: "http://unsafe.example/listing" }),
@@ -80,24 +84,27 @@ test("batch qualification retains only fresh owner-indicated, source-backed, exa
   ];
   const result = qualifyBatchListings(records, { now: Date.parse(today), maxFreshnessDays: 14, soldListingIds: new Set(["already-sold"]) });
   assert.equal(result.qualified.length, 1);
-  assert.equal(result.rejected.length, 10);
+  assert.equal(result.qualified[0].owner_verification_status, "verified");
+  assert.equal(result.rejected.length, 12);
   assert.equal(result.summary.leadCount, 1);
   assert.equal(result.summary.contactsAvailable, 1);
   assert.equal(result.summary.region, "Lagos");
   assert.ok(result.rejected.some((row) => row.id === "already-sold" && row.reasons.some((reason) => reason.includes("already sold"))));
+  assert.ok(result.rejected.some((row) => row.id === "unverified-owner" && row.reasons.some((reason) => reason.includes("Human ownership verification"))));
+  assert.ok(result.rejected.some((row) => row.id === "no-contact" && row.reasons.some((reason) => reason.includes("no contact information"))));
 });
 
 test("twenty eligible records have truthful batch contact, owner, category, source and price summaries", () => {
   const records = Array.from({ length: 20 }, (_, index) => listing({
     id: `listing-${index}`,
     poster_type: index < 4 ? "OWNER_VERIFIED" : "OWNER_UNVERIFIED",
-    has_contact_information: index < 11,
+    has_contact_information: true,
     property_type: index < 15 ? "house" : "apartment",
   }));
   const result = qualifyBatchListings(records, { now: Date.parse(today) });
   assert.equal(result.qualified.length, 20);
   assert.deepEqual(result.rejected, []);
-  assert.equal(result.summary.contactPercent, 55);
+  assert.equal(result.summary.contactPercent, 100);
   assert.equal(result.summary.ownerVerified, 4);
   assert.equal(result.summary.ownerUnverified, 16);
   assert.deepEqual(result.summary.propertyTypes, { house: 15, apartment: 5 });
@@ -147,6 +154,34 @@ test("offer copy uses actual batch facts and discloses shared distribution and n
   assert.match(message, /not marketing consent/);
   assert.match(message, /shared batch and may be offered to other buyers/);
   assert.match(message, /NGN 20,000.00 per lead/);
+});
+
+test("trial outreach drafts require a verified unsuppressed sale lead and a reviewed eligible agent", () => {
+  const verifiedLead = {
+    id: "listing-trial", title: "Verified home", city: "Miami", region: "FL", countryCode: "US",
+    currency: "USD", propertyType: "house", listingType: "sale", verificationStatus: "verified",
+    posterType: "OWNER_VERIFIED", ownerContactPermission: ["unknown"], suppressedAt: null, status: "new",
+  };
+  const reviewedAgent = {
+    id: "agent-trial", name: "Alex", city: "Miami", countryCode: "US", serviceAreas: [],
+    preferredPropertyTypes: ["house"], preferredListingTypes: ["sale"], preferredCurrency: "USD",
+    status: "reviewed", optedOutAt: null, hasContact: true, hasUsedTrial: false,
+  };
+  assert.equal(eligibleForTrialOutreach(verifiedLead, reviewedAgent), true);
+  assert.equal(eligibleForTrialOutreach({ ...verifiedLead, verificationStatus: "unverified" }, reviewedAgent), false);
+  assert.equal(eligibleForTrialOutreach({ ...verifiedLead, suppressedAt: today }, reviewedAgent), false);
+  assert.equal(eligibleForTrialOutreach({ ...verifiedLead, ownerContactPermission: ["opted_out"] }, reviewedAgent), false);
+  assert.equal(eligibleForTrialOutreach(verifiedLead, { ...reviewedAgent, city: "Tampa" }), false);
+  assert.equal(eligibleForTrialOutreach(verifiedLead, { ...reviewedAgent, optedOutAt: today }), false);
+  assert.equal(eligibleForTrialOutreach(verifiedLead, { ...reviewedAgent, hasUsedTrial: true }), false);
+  assert.equal(eligibleForTrialOutreach(verifiedLead, { ...reviewedAgent, linkedAccountActive: false }), false);
+
+  const message = composeTrialOutreachDraft("Alex", verifiedLead);
+  assert.match(message, /one owner-verified house sale lead available in Miami, US/);
+  assert.match(message, /one-lead, no-charge trial/);
+  assert.match(message, /no seller contact details are included/);
+  assert.match(message, /access is not granted by this message/);
+  assert.doesNotMatch(message, /Verified home|seller@example|555/);
 });
 
 test("currency minor-unit conversion handles NGN and zero-decimal JPY without rounding surprises", () => {

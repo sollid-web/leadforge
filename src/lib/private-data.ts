@@ -8,6 +8,10 @@ function encryptionKey() {
   return key;
 }
 
+export function assertPrivateDataEncryptionConfigured() {
+  encryptionKey();
+}
+
 export function encryptPrivateData(value: unknown) {
   const iv = randomBytes(12);
   const cipher = createCipheriv("aes-256-gcm", encryptionKey(), iv);

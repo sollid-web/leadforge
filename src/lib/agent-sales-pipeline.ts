@@ -9,6 +9,7 @@ export type PipelineListing = {
   price: number | null;
   owner_led_claim: boolean;
   poster_type: string;
+  owner_verification_status: string | null;
   source_url: string | null;
   status: string;
   suppressed_at?: string | null;
@@ -76,6 +77,8 @@ export function qualifyBatchListings(
     if (normalize(listing.city) !== marketCity || listing.country_code.toUpperCase() !== marketCountry) reasons.push("Listing does not belong to the batch's exact city and country.");
     if (listing.currency.toUpperCase() !== marketCurrency) reasons.push("Currency differs from the batch currency.");
     if (!listing.owner_led_claim || !["OWNER_UNVERIFIED", "OWNER_VERIFIED"].includes(listing.poster_type)) reasons.push("Lead is not classified as an owner-indicated listing.");
+    if (listing.owner_verification_status !== "verified") reasons.push("Human ownership verification is missing; owners.verification_status must be 'verified'.");
+    if (listing.listing_type === "sale" && !listing.has_contact_information) reasons.push("Sale listing has no contact information recorded.");
     if (["closed", "suppressed"].includes(listing.status) || listing.suppressed_at) reasons.push("Listing is closed or suppressed.");
     if (!safeHttpsUrl(listing.source_url)) reasons.push("Original source URL is missing or is not valid HTTPS.");
     if (options.soldListingIds?.has(listing.id)) reasons.push("Listing is already sold or reserved under an active offer.");

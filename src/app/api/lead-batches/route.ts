@@ -40,7 +40,7 @@ export async function POST(request: Request) {
   const ids = [...new Set(parsed.data.listingIds)];
   if (ids.length !== parsed.data.listingIds.length) return NextResponse.json({ error: "Duplicate listing IDs were supplied" }, { status: 400 });
   const { data: rawListings, error: listingError } = await context.admin.from("listings")
-    .select("id,title,city,region,country_code,currency,property_type,listing_type,price,owner_led_claim,poster_type,source_url,status,suppressed_at,has_contact_information,last_seen_at,first_seen_at,created_at,source_id,listing_sources(name,approved,active)")
+    .select("id,title,city,region,country_code,currency,property_type,listing_type,price,owner_led_claim,poster_type,source_url,status,suppressed_at,has_contact_information,last_seen_at,first_seen_at,created_at,source_id,listing_sources(name,approved,active),owners(verification_status)")
     .eq("organization_id", context.organizationId).in("id", ids);
   if (listingError) return NextResponse.json({ error: "Unable to load selected listings" }, { status: 500 });
   if ((rawListings ?? []).length !== ids.length) return NextResponse.json({ error: "One or more selected listings were not found in this organization" }, { status: 404 });
@@ -53,7 +53,9 @@ export async function POST(request: Request) {
   const mapped: ListingWithSource[] = (rawListings ?? []).map((listing) => {
     const relation = listing.listing_sources as SourceInfo | SourceInfo[] | null;
     const joinedSource = Array.isArray(relation) ? relation[0] : relation;
-    return { ...listing, source_name: joinedSource?.name ?? null, source: joinedSource ?? null } as ListingWithSource;
+    const ownerRelation = listing.owners as { verification_status: string } | { verification_status: string }[] | null;
+    const joinedOwner = Array.isArray(ownerRelation) ? ownerRelation[0] : ownerRelation;
+    return { ...listing, owner_verification_status: joinedOwner?.verification_status ?? null, source_name: joinedSource?.name ?? null, source: joinedSource ?? null } as ListingWithSource;
   });
   const base = qualifyBatchListings(mapped, { maxFreshnessDays: parsed.data.minimumFreshnessDays, soldListingIds: soldIds });
   const eligibleIds = new Set(base.qualified.filter((listing) => {

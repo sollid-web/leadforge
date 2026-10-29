@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSalesManagerContext } from "@/lib/sales-auth";
+import { assertPrivateDataEncryptionConfigured } from "@/lib/private-data";
 
 const runSchema = z.object({
   sourceId: z.string().uuid(),
@@ -42,7 +43,7 @@ export async function GET(request: Request) {
   if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status });
   const { context } = result;
   const { data, error } = await context.admin.from("listing_collection_runs")
-    .select("id,source_id,provider,status,discovered_count,imported_count,duplicate_count,rejected_count,contacts_found_count,error_message,started_at,completed_at,worker_configuration,worker_progress,worker_artifact_name,worker_heartbeat_at,authorization_reference")
+    .select("id,source_id,provider,status,discovered_count,imported_count,duplicate_count,rejected_count,held_count,contacts_found_count,error_message,started_at,completed_at,worker_configuration,worker_progress,worker_artifact_name,worker_heartbeat_at")
     .eq("organization_id", context.organizationId).eq("provider", "leadforge_scraper_worker")
     .order("started_at", { ascending: false }).limit(50);
   if (error) return NextResponse.json({ error: "Unable to load scraper runs" }, { status: 500 });
@@ -57,7 +58,12 @@ export async function POST(request: Request) {
   const endpoint = workerUrl();
   const token = process.env.LEADFORGE_SCRAPER_WORKER_TOKEN;
   const callbackBase = callbackBaseUrl();
-  if (!endpoint || !token || !callbackBase) return NextResponse.json({ error: "The separate scraper worker or trusted HTTPS callback URL is not configured. No collection run was created." }, { status: 503 });
+  if (!endpoint || !token || token.length < 32 || !callbackBase) return NextResponse.json({ error: "The separate scraper worker, strong worker token, or trusted HTTPS callback URL is not configured. No collection run was created." }, { status: 503 });
+  try {
+    assertPrivateDataEncryptionConfigured();
+  } catch {
+    return NextResponse.json({ error: "Valid contact-data encryption is required before collection. No run was created." }, { status: 503 });
+  }
   const { context } = result;
   const { data: source, error: sourceError } = await context.admin.from("listing_sources")
     .select("id,name,source_key,source_type,source_url,approved,active")
@@ -92,6 +98,7 @@ export async function POST(request: Request) {
     propertyType: parsed.data.propertyType,
     listingIntent: parsed.data.listingIntent,
     resultLimit: parsed.data.resultLimit,
+    liveCollectionEnabled: process.env.LEADFORGE_SCRAPER_LIVE_COLLECTION_ENABLED === "true",
   };
   const { data: run, error: runError } = await context.admin.from("listing_collection_runs").insert({
     organization_id: context.organizationId,

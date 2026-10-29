@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getOrganizationMember, writeAuditLog } from "@/lib/api-auth";
+import { prepareTrialOutreachDrafts } from "@/lib/trial-outreach";
+import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 import { getSupabaseServerClient } from "@/lib/supabase/server";
 
 const verificationSchema = z.object({
@@ -107,5 +109,19 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   } catch {
     return NextResponse.json({ error: "Verification decision saved but its audit record could not be written" }, { status: 500 });
   }
-  return NextResponse.json({ data: { listingId: listing.id, status: parsed.data.status, classification } });
+  let trialDraftsPrepared = 0;
+  let trialDraftWarning: string | null = null;
+  if (parsed.data.status === "verified") {
+    const admin = getSupabaseAdminClient();
+    if (!admin) {
+      trialDraftWarning = "Ownership verification was saved, but trial outreach drafts were not prepared because service-role access is not configured.";
+    } else {
+      try {
+        trialDraftsPrepared = await prepareTrialOutreachDrafts(admin, member.organization_id, listing.id, user.id);
+      } catch {
+        trialDraftWarning = "Ownership verification was saved, but trial outreach drafts could not be prepared. Review the migration and offer workspace before retrying.";
+      }
+    }
+  }
+  return NextResponse.json({ data: { listingId: listing.id, status: parsed.data.status, classification, trialDraftsPrepared, trialDraftWarning } });
 }

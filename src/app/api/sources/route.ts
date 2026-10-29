@@ -50,7 +50,7 @@ export async function GET() {
     .eq("organization_id", member.organization_id)
     .order("created_at", { ascending: false });
   if (error) return NextResponse.json({ error: "Unable to load sources" }, { status: 500 });
-  return NextResponse.json({ data });
+  return NextResponse.json({ canManage: ["owner", "admin", "manager"].includes(member.role), data });
 }
 
 export async function POST(request: Request) {

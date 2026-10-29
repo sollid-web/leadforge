@@ -2,7 +2,7 @@
 
 import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { ScoreBadge, StatusPill } from "@/components/dashboard-shell";
-import { UnteraDiscovery } from "@/components/untera-discovery";
+import { OwnerDiscoveryControls } from "@/components/owner-discovery-controls";
 import { parseCsv, parseCsvRecords } from "@/lib/listing-csv";
 import { hasLegacyScraperHeaders, mapScraperCsvRow } from "@/lib/scraper-csv";
 
@@ -137,6 +137,8 @@ export function OpportunityWorkspace() {
   const [notice, setNotice] = useState("");
   const [formOpen, setFormOpen] = useState(false);
   const [details, setDetails] = useState<Record<string, string> | null>(null);
+  const [ownerReview, setOwnerReview] = useState<{ listing: Opportunity; details: Record<string, string>; warning: string } | null>(null);
+  const [loadingOwnerReview, setLoadingOwnerReview] = useState(false);
   const [outreachListing, setOutreachListing] = useState<Opportunity | null>(null);
   const [contactOptions, setContactOptions] = useState<ContactOption[]>([]);
   const [contactType, setContactType] = useState<ContactType>("listing_agent");
@@ -539,6 +541,21 @@ export function OpportunityWorkspace() {
     }
   }
 
+  async function openOwnerReview(item: Opportunity) {
+    setError("");
+    setLoadingOwnerReview(true);
+    try {
+      const response = await fetch(`/api/listings/${item.id}/review`, { cache: "no-store" });
+      if (!response.ok) throw new Error(await getError(response));
+      const body = await response.json();
+      setOwnerReview({ listing: item, details: body.data.details as Record<string, string>, warning: body.data.warning as string });
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Unable to load the owner-candidate review.");
+    } finally {
+      setLoadingOwnerReview(false);
+    }
+  }
+
   async function suppressOpportunity(listingId: string) {
     const reason = window.prompt("Why should this opportunity be suppressed?");
     if (!reason?.trim()) return;
@@ -576,7 +593,13 @@ export function OpportunityWorkspace() {
         body: JSON.stringify({ status: "verified", verificationMethod, evidenceReference, reason }),
       });
       if (!response.ok) throw new Error(await getError(response));
-      setNotice("Owner-listed claim marked verified with evidence and an audit record.");
+      const body = await response.json();
+      const draftsPrepared = Number(body.data?.trialDraftsPrepared ?? 0);
+      const draftWarning = typeof body.data?.trialDraftWarning === "string" ? body.data.trialDraftWarning : "";
+      setNotice(draftWarning || (draftsPrepared
+        ? `Owner verified with evidence. ${draftsPrepared} pending no-send trial outreach draft${draftsPrepared === 1 ? " is" : "s are"} available in Offers.`
+        : "Owner verified with evidence. No reviewed, market-compatible agent prospects were eligible for trial drafts."));
+      setOwnerReview(null);
       await load();
     } catch (reasonError) {
       setError(reasonError instanceof Error ? reasonError.message : "Unable to verify owner claim.");
@@ -689,8 +712,8 @@ export function OpportunityWorkspace() {
       <div className="page-heading">
         <div>        <p className="eyebrow">Workspace / Opportunities</p><h1>Owner-seller leads</h1><p className="subheading">Find actionable properties offered by owners. Seller contact is shared only with the matched agent after manager review and approval.</p></div>
         <div className="page-heading-actions">
-          <label className="secondary-button">Import authorized CSV<input className="csv-file-input" type="file" accept=".csv,text/csv" onChange={(event) => void importListingsCsv(event)} disabled={importing} /></label>
-          <button className="primary-button" onClick={() => setFormOpen((open) => !open)}>{formOpen ? "Close form" : "+ Add opportunity"}</button>
+          <label className="secondary-button">Import CSV fallback<input className="csv-file-input" type="file" accept=".csv,text/csv" onChange={(event) => void importListingsCsv(event)} disabled={importing} /></label>
+          <button className="secondary-button" onClick={() => setFormOpen((open) => !open)}>{formOpen ? "Close form" : "Exceptional manual entry"}</button>
         </div>
       </div>
       {importProgress && <div className="workspace-alert" role="status">{importProgress}</div>}
@@ -714,11 +737,11 @@ export function OpportunityWorkspace() {
         </div>}
       </section>}
 
-      <div className="notice-banner"><span>◎</span><div><b>Prioritize genuine owner sellers.</b><p>RentCast provides listing records and may include listing-agent or office contacts; it does not establish an owner-posted listing or supply owner contact details. Add owner-seller leads from authorized sources with the original listing link and a seller phone or email. Agents see contact details only after interest and manager approval.</p></div></div>
+      <div className="notice-banner"><span>◎</span><div><b>Automated owner-seller discovery is the primary workflow.</b><p>Enable a recurring schedule only after recording source-specific collection permission. Scraped owner/contact identity stays unverified; managers must review evidence before a lead can enter an agent-facing sale batch. Contact data is encrypted, contact permission is unknown by default, and this workflow does not send agent outreach.</p></div></div>
       {error && <div className="workspace-alert error" role="alert">{error}</div>}
       {notice && <div className="workspace-alert success" role="status">{notice}</div>}
 
-      <UnteraDiscovery />
+      <OwnerDiscoveryControls />
 
       {metrics && <section className="metric-grid listing-discovery-metrics" aria-label="Listing discovery metrics">
         <div className="metric-card"><span className="metric-label">Listings discovered</span><b className="metric-value">{metrics.totalDiscovered}</b><span className="metric-change">No demo records</span></div>
@@ -788,7 +811,7 @@ export function OpportunityWorkspace() {
         </div>
         <div className="table-meta"><span><b>{visibleOpportunities.length}</b> {visibleOpportunities.length === 1 ? "opportunity" : "opportunities"}</span><span>Workspace records · no sample data</span></div>
         {loading ? <div className="workspace-state"><span className="loading-indicator" />Loading organization opportunities…</div>
-          : visibleOpportunities.length === 0 ? <div className="workspace-state"><h2>{opportunities.length ? "No opportunities match these filters" : "Your opportunity queue is empty"}</h2><p>{opportunities.length ? "Try a different search or status." : "Add a property record from a permitted source to start scoring and matching."}</p>{!opportunities.length && <button className="primary-button" onClick={() => setFormOpen(true)}>Add your first opportunity</button>}</div>
+          : visibleOpportunities.length === 0 ? <div className="workspace-state"><h2>{opportunities.length ? "No opportunities match these filters" : "Your owner-seller lead queue is empty"}</h2><p>{opportunities.length ? "Try a different search or status." : "After you configure an authorized source schedule above, eligible candidates will be discovered and ingested automatically. Manual entry is reserved for exceptions and controlled tests."}</p>{!opportunities.length && <button className="secondary-button" onClick={() => setFormOpen(true)}>Open exceptional manual entry</button>}</div>
             : <div className="table-scroll"><table><thead><tr><th>Opportunity</th><th>Location</th><th>Poster / source</th><th>Score</th><th>Status</th><th>Last seen</th><th>Actions</th></tr></thead><tbody>
               {visibleOpportunities.map((item) => <tr key={item.id}>
                 <td><div className="opportunity-title"><b>{item.title}</b><small>{item.property_type.replace("_", " ")} · {item.listing_type}{item.bedrooms !== null ? ` · ${item.bedrooms} beds` : ""}{item.price !== null ? ` · ${new Intl.NumberFormat().format(item.price)} ${item.currency}` : ""}</small></div></td>
@@ -797,7 +820,7 @@ export function OpportunityWorkspace() {
                 <td>{item.score ? <><ScoreBadge score={item.score.score} /><small className="score-label">Trust {item.score.trust_score}/100</small></> : <span className="muted-cell">Not scored</span>}</td>
                 <td><StatusPill tone={item.status === "matched" ? "green" : item.status === "review" ? "purple" : "blue"}>{item.status}</StatusPill></td>
                 <td className="muted-cell">{new Date(item.last_seen_at).toLocaleDateString()}</td>
-                <td><div className="table-row-actions">{item.listing_source_links?.[0]?.canonical_url && <a className="secondary-button small" href={item.listing_source_links[0].canonical_url} target="_blank" rel="noreferrer">View original ↗</a>}{item.poster_type === "OWNER_UNVERIFIED" && <button className="secondary-button small" onClick={() => void verifyOwnerClaim(item)}>Review owner claim</button>}<button className="secondary-button small" onClick={() => void calculateMatches(item.id)}>Match</button><button className="secondary-button small" onClick={() => void openContactOutreach(item)}>Contact</button><button className="secondary-button small" onClick={() => void suppressOpportunity(item.id)} aria-label={`Suppress ${item.title}`}>Suppress</button></div></td>
+                <td><div className="table-row-actions">{item.listing_source_links?.[0]?.canonical_url && <a className="secondary-button small" href={item.listing_source_links[0].canonical_url} target="_blank" rel="noreferrer">View original ↗</a>}{item.poster_type === "OWNER_UNVERIFIED" && <button className="secondary-button small" onClick={() => void openOwnerReview(item)} disabled={loadingOwnerReview}>{loadingOwnerReview ? "Loading review…" : "Review owner/contact"}</button>}<button className="secondary-button small" onClick={() => void calculateMatches(item.id)}>Match</button><button className="secondary-button small" onClick={() => void openContactOutreach(item)}>Contact</button><button className="secondary-button small" onClick={() => void suppressOpportunity(item.id)} aria-label={`Suppress ${item.title}`}>Suppress</button></div></td>
               </tr>)}
             </tbody></table></div>}
       </section>
@@ -827,6 +850,8 @@ export function OpportunityWorkspace() {
           </div>;
         })}
       </div></section>}
+
+      {ownerReview && <div className="details-overlay" role="presentation" onClick={() => setOwnerReview(null)}><section className="details-dialog" role="dialog" aria-modal="true" aria-labelledby="owner-review-heading" onClick={(event) => event.stopPropagation()}><div className="panel-header"><div><p className="eyebrow">Manager-only · audited reveal</p><h2 id="owner-review-heading">Review scraped owner candidate</h2><p>{ownerReview.listing.title} · {ownerReview.listing.area}, {ownerReview.listing.city}</p></div><button className="secondary-button small" onClick={() => setOwnerReview(null)}>Close</button></div><p className="form-hint">{ownerReview.warning}</p><dl>{Object.entries(ownerReview.details).filter(([key, value]) => Boolean(value) && ["ownerName", "ownerEmail", "ownerPhone", "address"].includes(key)).map(([key, value]) => <div key={key}><dt>{key.replace(/([A-Z])/g, " $1").replace(/^./, (letter) => letter.toUpperCase())}</dt><dd>{value}</dd></div>)}</dl><p>Confirm both the listing’s owner-posted status and the contact’s identity using reliable evidence. Source publication alone is not owner verification or contact permission.</p><div className="form-actions"><button className="primary-button" onClick={() => void verifyOwnerClaim(ownerReview.listing)}>Record verified ownership decision</button><button className="secondary-button" onClick={() => setOwnerReview(null)}>Keep unverified</button></div><small>Private contact reveal and the decision are recorded in the audit log. Agents cannot access this review view.</small></section></div>}
 
       {details && <div className="details-overlay" role="presentation" onClick={() => setDetails(null)}><section className="details-dialog" role="dialog" aria-modal="true" aria-labelledby="details-heading" onClick={(event) => event.stopPropagation()}><div className="panel-header"><div><p className="eyebrow">Approved access</p><h2 id="details-heading">Private property details</h2></div><button className="secondary-button small" onClick={() => setDetails(null)}>Close</button></div><dl>{Object.entries(details).filter(([, value]) => Boolean(value)).map(([key, value]) => <div key={key}><dt>{key.replace(/([A-Z])/g, " $1").replace(/^./, (letter) => letter.toUpperCase())}</dt><dd>{value}</dd></div>)}</dl><small>Access to these details was recorded in the workspace audit log.</small></section></div>}
 

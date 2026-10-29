@@ -25,11 +25,16 @@ export type ScraperListingPayload = {
   currency: string;
   ownerLedClaim: boolean;
   posterType: "OWNER_UNVERIFIED" | "AGENT" | "DEVELOPER" | "COMPANY" | "UNKNOWN";
+  posterDecision: "owner_candidate" | "reject_agent" | "hold_ambiguous";
+  posterDecisionReason?: string;
   posterEvidence?: string;
   posterMethod: "source_metadata";
   publishedAt?: string;
   publicContactContext?: string;
   privateDetails?: {
+    ownerName?: string;
+    ownerEmail?: string;
+    ownerPhone?: string;
     otherContactName?: string;
     otherContactEmail?: string;
     otherContactPhone?: string;
@@ -115,6 +120,12 @@ function secureListingUrl(value: string) {
   }
 }
 
+function approvedHostMatches(baseHost: string, listingHost: string) {
+  const normalizedBase = baseHost.toLocaleLowerCase("en").replace(/^www\./, "");
+  const normalizedListing = listingHost.toLocaleLowerCase("en").replace(/^www\./, "");
+  return normalizedListing === normalizedBase || normalizedListing.endsWith(`.${normalizedBase}`);
+}
+
 export function mapScraperCsvRow(row: CsvRecord, sources: ScraperImportSource[]): ScraperCsvMapping {
   const errors: string[] = [];
   const warnings: string[] = [];
@@ -140,7 +151,7 @@ export function mapScraperCsvRow(row: CsvRecord, sources: ScraperImportSource[])
     else {
       const baseUrl = secureListingUrl(configuredSource.source_url);
       if (!baseUrl) errors.push("The configured source URL is not a valid HTTPS URL.");
-      else if (externalUrl && baseUrl.hostname.toLocaleLowerCase("en") !== externalUrl.hostname.toLocaleLowerCase("en")) {
+      else if (externalUrl && !approvedHostMatches(baseUrl.hostname, externalUrl.hostname)) {
         errors.push("Listing URL host does not match the approved source host.");
       }
     }
@@ -169,7 +180,21 @@ export function mapScraperCsvRow(row: CsvRecord, sources: ScraperImportSource[])
   } else if (/\bfsbo\b|for sale by owner/i.test(stringValue(row.type))) {
     posterType = "OWNER_UNVERIFIED";
   }
-  const ownerLedClaim = posterType === "OWNER_UNVERIFIED";
+  const requestedDecision = stringValue(row.poster_decision);
+  let posterDecision: ScraperListingPayload["posterDecision"] =
+    requestedDecision === "reject_agent" || requestedDecision === "hold_ambiguous" || requestedDecision === "owner_candidate"
+      ? requestedDecision
+      : posterType === "AGENT" || posterType === "DEVELOPER" || posterType === "COMPANY"
+        ? "reject_agent"
+        : posterType === "OWNER_UNVERIFIED" ? "owner_candidate" : "hold_ambiguous";
+  if (posterDecision === "owner_candidate" && posterType !== "OWNER_UNVERIFIED") {
+    errors.push("Owner candidate decision must remain OWNER_UNVERIFIED; source data cannot assert ownership verification.");
+    posterDecision = "hold_ambiguous";
+    posterType = "UNKNOWN";
+  }
+  if (posterDecision === "reject_agent") posterType = "AGENT";
+  if (posterDecision === "hold_ambiguous") posterType = "UNKNOWN";
+  const ownerLedClaim = posterDecision === "owner_candidate";
   const posterEvidence = stringValue(row.poster_evidence) || (ownerLedClaim
     ? "Scraper source labeled this record FSBO; this is not independent owner verification."
     : undefined);
@@ -196,11 +221,19 @@ export function mapScraperCsvRow(row: CsvRecord, sources: ScraperImportSource[])
   const contactPhone = stringValue(row.phone || row.owner_phone);
   if (contactEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail)) errors.push("Contact email is malformed.");
   const hasContact = Boolean(contactName || contactEmail || contactPhone);
-  const contactFields = hasContact ? {
-    otherContactName: contactName || undefined,
-    otherContactEmail: contactEmail || undefined,
-    otherContactPhone: contactPhone || undefined,
-  } : undefined;
+  const contactFields = hasContact
+    ? ownerLedClaim
+      ? {
+          ownerName: contactName || undefined,
+          ownerEmail: contactEmail || undefined,
+          ownerPhone: contactPhone || undefined,
+        }
+      : {
+          otherContactName: contactName || undefined,
+          otherContactEmail: contactEmail || undefined,
+          otherContactPhone: contactPhone || undefined,
+        }
+    : undefined;
   const dateRaw = stringValue(row.published_at || row.date_posted);
   const publishedAt = parsePublishedAt(dateRaw);
   if (dateRaw && !publishedAt) warnings.push("Publication date was not a valid ISO-compatible date and was omitted.");
@@ -226,11 +259,15 @@ export function mapScraperCsvRow(row: CsvRecord, sources: ScraperImportSource[])
     currency,
     ownerLedClaim,
     posterType,
+    posterDecision,
+    posterDecisionReason: stringValue(row.poster_decision_reason) || undefined,
     posterEvidence,
     posterMethod: "source_metadata",
     publishedAt,
     publicContactContext: hasContact
-      ? "Contact details were extracted from the source listing by the scraper; identity and role are not independently verified. Contact permission remains unknown."
+      ? ownerLedClaim
+        ? "Unverified owner-contact candidate extracted from an owner-listed source page; identity and role require manager verification. Contact permission remains unknown."
+        : "Contact details were extracted from the source listing by the scraper; identity and role are not independently verified. Contact permission remains unknown."
       : undefined,
     privateDetails: contactFields,
   };

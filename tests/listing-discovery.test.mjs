@@ -4,6 +4,7 @@ import { contactFingerprint } from "../src/lib/contact-identity.ts";
 import { parseCsv, parseCsvRecords } from "../src/lib/listing-csv.ts";
 import { mapScraperCsvRow } from "../src/lib/scraper-csv.ts";
 import { listingInputSchema, normalizeListing } from "../src/lib/opportunities.ts";
+import { ownerScraperSourceSupportsCity, validateOwnerScraperSource } from "../src/lib/scraper-worker.ts";
 
 const listing = {
   sourceName: "Owner submission",
@@ -73,7 +74,28 @@ test("CSV import parses quoted delimiters and rejects malformed rows", () => {
   assert.throws(() => parseCsv("title,property_type,area,city,country_code\none,house,Lekki,Lagos,NG,extra"));
 });
 
-test("legacy scraper CSV maps only to an approved matching feed and keeps contacts unclassified", () => {
+test("worker manifest parser allows a header-only zero-result run only when explicitly requested", () => {
+  const headerOnly = "id,source_name,city,title,source_url,country_code,listing_type,poster_type";
+  assert.throws(() => parseCsvRecords(headerOnly));
+  assert.deepEqual(parseCsvRecords(headerOnly, { allowHeaderOnly: true }), []);
+});
+
+test("scheduled owner discovery enforces exact adapter host and per-source city coverage", () => {
+  const source = {
+    source_key: "craigslist",
+    name: "Craigslist",
+    source_type: "approved_feed",
+    source_url: "https://www.craigslist.org/",
+    approved: true,
+    active: true,
+  };
+  assert.equal(validateOwnerScraperSource(source), null);
+  assert.equal(ownerScraperSourceSupportsCity("craigslist", "Broward"), true);
+  assert.equal(ownerScraperSourceSupportsCity("forsalebyowner", "Palm Beach"), false);
+  assert.match(validateOwnerScraperSource({ ...source, source_url: "https://craigslist.org.evil.test/" }) ?? "", /host does not match/);
+});
+
+test("legacy scraper CSV keeps FSBO contacts as explicitly unverified owner candidates", () => {
   const [row] = parseCsvRecords('id,type,source,city,title,price,location,date_posted,link,owner_name,phone,notes,email\n"z-42",FSBO,Zillow,Miami,"2 bed home", "$500,000", "Miami, FL",2026-10-01,https://www.zillow.com/homedetails/42/,Jane Doe,3055550100,"2bd/2ba",jane@example.com');
   const mapped = mapScraperCsvRow(row, [{
     name: "Zillow",
@@ -90,11 +112,12 @@ test("legacy scraper CSV maps only to an approved matching feed and keeps contac
   assert.equal(mapped.payload.currency, "USD");
   assert.equal(mapped.payload.listingType, "sale");
   assert.equal(mapped.payload.posterType, "OWNER_UNVERIFIED");
-  assert.equal(mapped.payload.privateDetails?.otherContactEmail, "jane@example.com");
-  assert.equal(mapped.payload.privateDetails?.otherContactPhone, "3055550100");
-  assert.equal(mapped.payload.privateDetails?.otherContactName, "Jane Doe");
-  assert.equal("ownerEmail" in (mapped.payload.privateDetails ?? {}), false);
-  assert.match(mapped.payload.publicContactContext ?? "", /role are not independently verified/);
+  assert.equal(mapped.payload.privateDetails?.ownerEmail, "jane@example.com");
+  assert.equal(mapped.payload.privateDetails?.ownerPhone, "3055550100");
+  assert.equal(mapped.payload.privateDetails?.ownerName, "Jane Doe");
+  assert.equal("otherContactEmail" in (mapped.payload.privateDetails ?? {}), false);
+  assert.match(mapped.payload.publicContactContext ?? "", /identity and role require manager verification/);
+  assert.match(mapped.payload.publicContactContext ?? "", /Contact permission remains unknown/);
   assert.equal(listingInputSchema.safeParse(mapped.payload).success, true);
 
   const ambiguous = mapScraperCsvRow({ ...row, price: "From $500,000 - $600,000" }, [{
@@ -128,6 +151,51 @@ test("LeadForge worker manifest maps into preview with exact source, US sale, an
   assert.equal(mapped.payload.ownerLedClaim, true);
   assert.equal(mapped.payload.currency, "USD");
   assert.equal(listingInputSchema.safeParse(mapped.payload).success, true);
+});
+
+test("worker agent and ambiguous poster decisions cannot be promoted to owner candidates", () => {
+  const base = {
+    source_name: "ForSaleByOwner.com",
+    source_url: "https://www.forsalebyowner.com/listing/123",
+    country_code: "US",
+    region: "FL",
+    currency: "USD",
+    listing_type: "sale",
+    property_type: "other",
+    city: "Miami",
+    title: "Sample listing",
+    price: "$420000",
+    link: "https://www.forsalebyowner.com/listing/123",
+  };
+  const source = [{
+    name: "ForSaleByOwner.com",
+    source_type: "approved_feed",
+    source_url: "https://www.forsalebyowner.com",
+    approved: true,
+    active: true,
+  }];
+  const rejected = mapScraperCsvRow({
+    ...base,
+    poster_type: "AGENT",
+    poster_decision: "reject_agent",
+    poster_decision_reason: "explicit_agent_or_broker_evidence",
+  }, source);
+  assert.deepEqual(rejected.errors, []);
+  assert.equal(rejected.payload?.posterDecision, "reject_agent");
+  assert.equal(rejected.payload?.ownerLedClaim, false);
+  assert.equal(rejected.payload?.posterType, "AGENT");
+
+  const held = mapScraperCsvRow({
+    ...base,
+    poster_type: "UNKNOWN",
+    poster_decision: "hold_ambiguous",
+    poster_decision_reason: "no_strong_owner_source_signal",
+    poster_evidence: "source_or_poster_signal_missing",
+  }, source);
+  assert.deepEqual(held.errors, []);
+  assert.equal(held.payload?.posterDecision, "hold_ambiguous");
+  assert.equal(held.payload?.ownerLedClaim, false);
+  assert.equal(held.payload?.posterType, "UNKNOWN");
 });
 
 test("legacy scraper CSV rejects unapproved sources, mismatched hosts, missing transaction, and verified-owner claims", () => {

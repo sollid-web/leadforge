@@ -1,6 +1,6 @@
 export type CsvRecord = Record<string, string>;
 
-export function parseCsvRecords(text: string): CsvRecord[] {
+export function parseCsvRecords(text: string, options: { allowHeaderOnly?: boolean } = {}): CsvRecord[] {
   const rows: string[][] = [];
   let row: string[] = [];
   let field = "";
@@ -37,7 +37,7 @@ export function parseCsvRecords(text: string): CsvRecord[] {
   if (quoted) throw new Error("CSV contains an unclosed quoted field.");
   row.push(field.trim());
   if (row.some((value) => value.length > 0)) rows.push(row);
-  if (rows.length < 2) throw new Error("CSV must include a header row and at least one listing row.");
+  if (rows.length < 2 && !(options.allowHeaderOnly && rows.length === 1)) throw new Error("CSV must include a header row and at least one listing row.");
 
   const headers = rows[0].map((header) => header.trim().toLocaleLowerCase("en").replace(/[\s-]+/g, "_"));
   if (headers.some((header) => !header)) throw new Error("CSV column names cannot be empty.");
