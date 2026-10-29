@@ -1,26 +1,7 @@
 import { timingSafeEqual } from "node:crypto";
+import { canonicalOwnerScraperSourceKey, ownerScraperAdapters } from "./owner-scraper-sources.ts";
 
-export const ownerScraperCities = [
-  "Miami",
-  "Fort Lauderdale",
-  "West Palm Beach",
-  "Broward",
-  "Boca Raton",
-  "Hialeah",
-  "Palm Beach",
-] as const;
-
-const adapters: Record<string, { name: string; host: string }> = {
-  craigslist: { name: "Craigslist", host: "craigslist.org" },
-  forsalebyowner: { name: "ForSaleByOwner.com", host: "forsalebyowner.com" },
-  byowner: { name: "ByOwner.com", host: "byowner.com" },
-};
-
-const citiesByAdapter: Record<string, readonly string[]> = {
-  craigslist: ["Miami", "Fort Lauderdale", "West Palm Beach", "Broward"],
-  forsalebyowner: ["Miami", "Fort Lauderdale", "West Palm Beach", "Boca Raton", "Hialeah"],
-  byowner: ["Miami", "Broward", "Palm Beach"],
-};
+export { canonicalOwnerScraperSourceKey, ownerScraperCities, ownerScraperCitiesForSource, ownerScraperSourceSupportsCity } from "./owner-scraper-sources.ts";
 
 export type WorkerSource = {
   source_key: string;
@@ -31,16 +12,8 @@ export type WorkerSource = {
   active: boolean;
 };
 
-export function ownerScraperCitiesForSource(sourceKey: string) {
-  return citiesByAdapter[sourceKey] ?? [];
-}
-
-export function ownerScraperSourceSupportsCity(sourceKey: string, city: string) {
-  return ownerScraperCitiesForSource(sourceKey).includes(city);
-}
-
 export function validateOwnerScraperSource(source: WorkerSource) {
-  const adapter = adapters[source.source_key];
+  const adapter = ownerScraperAdapters[canonicalOwnerScraperSourceKey(source.source_key)];
   if (!adapter) return "This source is not one of the worker's supported owner-listing adapters.";
   if (source.name !== adapter.name) return `The source name must exactly match ${adapter.name} so scraper provenance remains attributable.`;
   if (!source.approved || !source.active) return "The source must be approved and active before collection.";

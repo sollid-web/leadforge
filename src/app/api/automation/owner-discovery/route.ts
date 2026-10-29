@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 import { assertPrivateDataEncryptionConfigured } from "@/lib/private-data";
-import { hasValidBearer, ownerScraperSourceSupportsCity, trustedCallbackOrigin, validateOwnerScraperSource, workerRunsEndpoint, type WorkerSource } from "@/lib/scraper-worker";
+import { canonicalOwnerScraperSourceKey, hasValidBearer, ownerScraperSourceSupportsCity, trustedCallbackOrigin, validateOwnerScraperSource, workerRunsEndpoint, type WorkerSource } from "@/lib/scraper-worker";
 
 export const runtime = "nodejs";
 
@@ -64,7 +64,7 @@ export async function POST(request: Request) {
   }
   const configuration = {
     policyId,
-    sourceKey: source.source_key,
+    sourceKey: canonicalOwnerScraperSourceKey(source.source_key),
     sourceId: safeText(claim.source_id),
     sourceName: source.name,
     sourceType: source.source_type,

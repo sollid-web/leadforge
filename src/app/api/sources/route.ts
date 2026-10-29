@@ -64,7 +64,14 @@ export async function POST(request: Request) {
   if (membershipError) return NextResponse.json({ error: "Unable to check organization permissions" }, { status: 500 });
   if (!member) return NextResponse.json({ error: "Manager permission required" }, { status: 403 });
 
-  const sourceKey = parsed.data.name.toLocaleLowerCase("en").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+  const builtInSourceKeys: Record<string, string> = {
+    craigslist: "craigslist",
+    "forsalebyowner.com": "forsalebyowner",
+    "byowner.com": "byowner",
+  };
+  const normalizedSourceName = parsed.data.name.toLocaleLowerCase("en");
+  const sourceKey = builtInSourceKeys[normalizedSourceName]
+    ?? normalizedSourceName.replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
   const manual = parsed.data.sourceType === "manual";
   const apiSource = parsed.data.sourceType === "public_api";
   const ingestionToken = manual || apiSource ? null : randomBytes(32).toString("base64url");

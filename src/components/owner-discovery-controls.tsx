@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useState } from "react";
+import { canonicalOwnerScraperSourceKey, ownerScraperCitiesForSource } from "@/lib/owner-scraper-sources";
 
 type Source = {
   id: string;
@@ -29,12 +30,6 @@ type Policy = {
 };
 
 const cities = ["Miami", "Fort Lauderdale", "West Palm Beach", "Broward", "Boca Raton", "Hialeah", "Palm Beach"];
-const citiesBySource: Record<string, string[]> = {
-  craigslist: ["Miami", "Fort Lauderdale", "West Palm Beach", "Broward"],
-  forsalebyowner: ["Miami", "Fort Lauderdale", "West Palm Beach", "Boca Raton", "Hialeah"],
-  byowner: ["Miami", "Broward", "Palm Beach"],
-};
-
 async function responseError(response: Response) {
   const body = await response.json().catch(() => ({}));
   return typeof body.error === "string" ? body.error : `Request failed (${response.status})`;
@@ -88,7 +83,7 @@ export function OwnerDiscoveryControls() {
           if (!cancelled) setAccessDenied(true);
           return;
         }
-        const eligible = (body.data as Source[]).filter((source) => source.approved && source.active && ["craigslist", "forsalebyowner", "byowner"].includes(source.source_key));
+        const eligible = (body.data as Source[]).filter((source) => source.approved && source.active && ["craigslist", "forsalebyowner", "byowner"].includes(canonicalOwnerScraperSourceKey(source.source_key)));
         if (cancelled) return;
         setSources(eligible);
         const firstId = eligible[0]?.id ?? "";
@@ -105,7 +100,7 @@ export function OwnerDiscoveryControls() {
 
   async function changeSource(value: string) {
     setSourceId(value);
-    const supported = citiesBySource[sources.find((source) => source.id === value)?.source_key ?? ""] ?? cities;
+    const supported = ownerScraperCitiesForSource(canonicalOwnerScraperSourceKey(sources.find((source) => source.id === value)?.source_key ?? ""));
     setCity(supported[0] ?? cities[0]);
     setError("");
     try {
@@ -172,17 +167,17 @@ export function OwnerDiscoveryControls() {
   }
 
   const hasEnabled = policies.some((policy) => policy.enabled);
-  const availableCities = citiesBySource[sources.find((source) => source.id === sourceId)?.source_key ?? ""] ?? cities;
+  const availableCities = ownerScraperCitiesForSource(canonicalOwnerScraperSourceKey(sources.find((source) => source.id === sourceId)?.source_key ?? ""));
   if (accessDenied) return null;
   return <section className="panel owner-discovery-panel">
     <div className="panel-header"><div><p className="eyebrow">Automated discovery</p><h2>Owner-seller scraper schedule</h2><p>Authorized schedules discover owner-listed sale leads, encrypt candidate contacts, and queue them for human ownership verification. This does not send agent messages or expose unverified leads to agents.</p></div></div>
     {error && <div className="workspace-alert error" role="alert">{error}</div>}
     {notice && <div className="workspace-alert success" role="status">{notice}</div>}
-    {loading ? <div className="workspace-state"><span className="loading-indicator" />Loading approved scraper sources…</div> : sources.length === 0
-      ? <p className="form-hint">No supported approved scraper source is available. Register an authorized Craigslist, ForSaleByOwner.com, or ByOwner.com feed, confirm its permission, and have a manager approve it first.</p>
+    {loading ? <div className="workspace-state"><span className="loading-indicator" />Loading built-in scraper sources…</div> : sources.length === 0
+      ? <p className="form-hint">No built-in owner-scraper sources are available yet. Apply migration 202610290001_builtin_owner_scraper_sources.sql to this Supabase project, then refresh. After that, a manager only needs to record the authorized source/city scope, evidence reference, and expiry here before scheduled collection.</p>
       : <>
         <div className="listing-filter-grid">
-          <label>Approved source<select value={sourceId} onChange={(event) => void changeSource(event.target.value)}>{sources.map((source) => <option key={source.id} value={source.id}>{source.name}</option>)}</select></label>
+          <label>Built-in source<select value={sourceId} onChange={(event) => void changeSource(event.target.value)}>{sources.map((source) => <option key={source.id} value={source.id}>{source.name}</option>)}</select></label>
           <label>City / service area<select value={availableCities.includes(city) ? city : availableCities[0]} onChange={(event) => setCity(event.target.value)}>{availableCities.map((item) => <option key={item} value={item}>{item}</option>)}</select></label>
         </div>
         <form className="opportunity-form" onSubmit={(event) => void savePolicy(event)}>

@@ -4,7 +4,7 @@ import { contactFingerprint } from "../src/lib/contact-identity.ts";
 import { parseCsv, parseCsvRecords } from "../src/lib/listing-csv.ts";
 import { mapScraperCsvRow } from "../src/lib/scraper-csv.ts";
 import { listingInputSchema, normalizeListing } from "../src/lib/opportunities.ts";
-import { ownerScraperSourceSupportsCity, validateOwnerScraperSource } from "../src/lib/scraper-worker.ts";
+import { canonicalOwnerScraperSourceKey, ownerScraperSourceSupportsCity, validateOwnerScraperSource } from "../src/lib/scraper-worker.ts";
 
 const listing = {
   sourceName: "Owner submission",
@@ -93,6 +93,35 @@ test("scheduled owner discovery enforces exact adapter host and per-source city 
   assert.equal(ownerScraperSourceSupportsCity("craigslist", "Broward"), true);
   assert.equal(ownerScraperSourceSupportsCity("forsalebyowner", "Palm Beach"), false);
   assert.match(validateOwnerScraperSource({ ...source, source_url: "https://craigslist.org.evil.test/" }) ?? "", /host does not match/);
+});
+
+test("legacy `.com` source keys normalize to the ForSaleByOwner and ByOwner adapters", () => {
+  const forSaleByOwner = {
+    source_key: "forsalebyowner-com",
+    name: "ForSaleByOwner.com",
+    source_type: "approved_feed",
+    source_url: "https://www.forsalebyowner.com/",
+    approved: true,
+    active: true,
+  };
+  const byOwner = {
+    source_key: "byowner-com",
+    name: "ByOwner.com",
+    source_type: "partner_feed",
+    source_url: "https://www.byowner.com/",
+    approved: true,
+    active: true,
+  };
+
+  assert.equal(canonicalOwnerScraperSourceKey(forSaleByOwner.source_key), "forsalebyowner");
+  assert.equal(canonicalOwnerScraperSourceKey(byOwner.source_key), "byowner");
+  assert.equal(validateOwnerScraperSource(forSaleByOwner), null);
+  assert.equal(validateOwnerScraperSource(byOwner), null);
+  assert.equal(ownerScraperSourceSupportsCity(forSaleByOwner.source_key, "Boca Raton"), true);
+  assert.equal(ownerScraperSourceSupportsCity(forSaleByOwner.source_key, "Palm Beach"), false);
+  assert.equal(ownerScraperSourceSupportsCity(byOwner.source_key, "Palm Beach"), true);
+  assert.match(validateOwnerScraperSource({ ...forSaleByOwner, source_url: "https://forsalebyowner.com.evil.test/" }) ?? "", /host does not match/);
+  assert.match(validateOwnerScraperSource({ ...byOwner, name: "Wrong Source" }) ?? "", /name must exactly match/);
 });
 
 test("legacy scraper CSV keeps FSBO contacts as explicitly unverified owner candidates", () => {

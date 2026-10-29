@@ -10,14 +10,14 @@ The worker supports only its configured US sale sources and city/area labels. A 
 
 ## Workflow and gates
 
-1. An owner/admin/manager registers the supported external source, confirms its exact HTTPS base URL, and approves/activates the source.
-2. In **Dashboard → Leads → Owner-seller scraper schedule**, the manager records the permission reference, authorized collection scope, city, result cap, cadence (24–168 hours) and permission expiry. The UI displays only city labels implemented for that source.
+1. The supported Craigslist, ForSaleByOwner.com, and ByOwner.com adapter records are provisioned automatically for every organization by migration `202610290001_builtin_owner_scraper_sources.sql`; managers do not need to register or separately approve those built-in sources. The records identify supported adapters, not legal permission to collect.
+2. In **Dashboard → Leads → Owner-seller scraper schedule**, a manager records the permission reference, authorized collection scope, city, result cap, cadence (24–168 hours) and permission expiry. This explicit source/city authorization is still required before collection; the UI displays only city labels implemented for that adapter.
 3. An external scheduler calls `POST /api/automation/owner-discovery`. The endpoint validates `CRON_SECRET`, worker configuration, callback origin and AES encryption readiness before atomically claiming one due policy.
 4. LeadForge dispatches an authenticated job to the isolated worker. Live collection is disabled unless **both** the LeadForge app flag and worker flag are explicitly set to `true`; either missing or false flag produces an offline dry-run callback with zero leads and no source requests. The callback is authenticated with the worker bearer token; it is not a cryptographic webhook signature.
 5. When live collection is explicitly enabled, the worker returns a bounded manifest. Its shared source-aware filter rejects clear agent/broker evidence before contact extraction, treats configured owner-search/source paths only as unverified candidate evidence, and marks records without a configured owner signal for a contact-free hold. LeadForge rechecks the run scope, current source approval, adapter host, supported city, authorization expiry, result cap and sale intent; it encrypts contacts for eligible candidates with AES-256-GCM. Source-page wording and heuristics do not prove legal ownership. The worker's temporary artifacts need a separate private retention/deletion policy.
 6. A manager opens **Review owner/contact** for each candidate, examines the original posting and independent evidence, and records an ownership verification decision. The system never promotes the scrape's owner claim to verified automatically. After a successful human verification, LeadForge prepares a one-lead outreach draft for reviewed, market-compatible agent prospects who have contact on file, have not opted out, and have not used their linked trial. The draft includes no seller contact details.
 7. The batch qualifier and `approve_lead_batch` RPC require `owners.verification_status = 'verified'`, a contact on file that has not opted out, an approved active source, fresh records, and the remaining batch rules. Standard agent-sale batches still require at least 20 leads.
-8. The verified-lead trial path remains separate from bulk sale batches: after human ownership verification, the first eligible no-charge sample is limited to **one per agent** and linked to that agent. The new unapplied migration replaces the earlier per-organization sample cap and stores trial outreach drafts. Drafts appear under **Dashboard → Offers** and can be copied or dismissed by a manager; edit the copied text before manually sending it through an authorized channel. This implementation never sends them. A reply, trial eligibility, price/terms, payment state and delivery remain explicit business decisions. The sample never exposes an unverified candidate; later access for the same agent follows the payment-required flow.
+8. The verified-lead trial path remains separate from bulk sale batches: after human ownership verification, the first eligible no-charge sample is limited to **one per agent** and linked to that agent. Migration `202610280001_owner_discovery_automation.sql` replaces the earlier per-organization sample cap and stores trial outreach drafts. Drafts appear under **Dashboard → Offers** and can be copied or dismissed by a manager; edit the copied text before manually sending it through an authorized channel. This implementation never sends them. A reply, trial eligibility, price/terms, payment state and delivery remain explicit business decisions. The sample never exposes an unverified candidate; later access for the same agent follows the payment-required flow.
 
 ## Required server configuration
 
@@ -40,8 +40,8 @@ Set `LEADFORGE_WORKER_TOKEN` to match the LeadForge worker token. Configure `LEA
 
 ## Staging deployment sequence
 
-1. **Verify the target Supabase project before migration.** Confirm the selected organization/project reference in the Supabase CLI and deployment settings; compare it to the intended staging project. Do not run migrations against an unverified project. The migration `202610280001_owner_discovery_automation.sql` is new for this change and is not applied by this repository update.
-2. Back up the staging database and apply the pending migration to staging only. Confirm the new `owner_discovery_policies`, `scraper_candidate_holds`, and `trial_outreach_drafts` tables, `held_count`, ingestion columns, `claim_due_owner_discovery_policy()` function, replacement `approve_lead_batch()` and `prepare_owner_lead_access()` functions, and the `lead_purchases_one_sample_per_agent` index exist. Review the query/RLS/role grants before production rollout.
+1. **Verify the target Supabase project before migration.** Confirm the selected organization/project reference in the Supabase CLI and deployment settings; compare it to the intended staging/production project. Do not run migrations against an unverified project.
+2. Back up the target database and apply only migrations missing from its migration history. `202610280001_owner_discovery_automation.sql` contains the automation, hold-queue, trial-draft, and per-agent sample changes. `202610290001_builtin_owner_scraper_sources.sql` seeds the three built-in adapter records for existing organizations and installs a trigger for new organizations. Confirm the expected tables/functions/indexes and that each organization now has the three supported source records. Review RLS/grants before production rollout.
 3. Deploy the LeadForge application code and configure the application environment variables above. Keep live collection false.
 4. Build and deploy the isolated worker from the Scraper repository root:
 
@@ -60,7 +60,7 @@ Set `LEADFORGE_WORKER_TOKEN` to match the LeadForge worker token. Configure `LEA
    ```
 
    Configure the cron provider to use secret interpolation rather than embedding the value in a checked-in file or URL. The scheduler is application-owned; this change does not install a hosted cron service or activate the existing disabled n8n pack.
-7. Create/approve the authorized source and enable one policy in the manager UI. With both live flags false, the scheduled worker should validate configuration and report `dry_run`, with no source requests, no manifest ingestion, and zero lead/contact counts. Confirm that the callback and run-status record update correctly.
+7. Confirm the built-in sources appear under **Dashboard → Settings → Listing sources**; no manual registration or approval is needed for those adapters. In **Dashboard → Leads**, enable one policy by entering its authorization evidence and scope. With both live flags false, the scheduled worker should report `dry_run`, with no source requests, no manifest ingestion, and zero lead/contact counts. Confirm that the callback and run-status record update correctly.
 8. Before any live collection, the source-specific written permission, exact scope, host, city, cadence, expiry, retention and privacy review must be complete. Then explicitly enable both live flags in staging and run one narrowly scoped authorized test (result cap 1) only after an owner/authorized administrator approves that action. Inspect the encrypted candidate in the manager review UI; do not send outreach or payment during this test.
 9. Only after staging evidence is reviewed should the migration and code be promoted to the verified production project. Enable the production live flags only after an authorized business owner confirms the source scope and operational readiness.
 
@@ -72,18 +72,18 @@ The worker's authenticated `GET /health` reports process readiness and whether i
 
 - A candidate begins unverified. A manager must inspect its source and confirm owner identity before verification.
 - Contact reveal for that review is manager-only and audit logged. A lead batch cannot be approved merely because the scraper labeled the result owner-posted.
-- The new migration changes the legacy one-free-sample rule from **per organization** to **one per agent**. This policy change is not active until the migration is reviewed and applied to the verified target environment.
+- The verified-lead trial cap is **one per agent** only in projects where migration `202610280001_owner_discovery_automation.sql` is present in the verified remote migration history.
 - Agent message/offer drafts, follow-ups, price/discount decisions, payment verification, and delivery require configured integrations and explicit manager approval. Do not treat a drafted offer or simulated payment as sent or paid.
 
 ## Activation checklist
 
 ### Before a dry run
 
-- [ ] Confirm staging Supabase project identity and apply the reviewed migration to staging only.
+- [ ] Confirm the Supabase project identity and apply the reviewed pending migrations, including `202610290001_builtin_owner_scraper_sources.sql`.
 - [ ] Deploy LeadForge and the isolated worker over HTTPS/private networking.
 - [ ] Configure service-role access, callback origin, worker URL/token, encryption key and cron secret in server-side secret stores.
 - [ ] Keep both live-collection flags false; verify worker health and app callback reachability.
-- [ ] Approve a supported source record and record its source terms/permission evidence in the manager policy form.
+- [ ] Confirm the three built-in source records appear automatically; record exact source permission, scope, reference, and expiry in the manager policy form (no separate source registration/approval step).
 - [ ] Add the 15-minute scheduler and confirm an offline dry-run status without source traffic.
 
 ### Before the first authorized live trial
@@ -98,4 +98,4 @@ The worker's authenticated `GET /health` reports process readiness and whether i
 
 ## What this change does not prove
 
-No migration was applied to a live Supabase project, no worker image was built/deployed, no cron provider was configured, no live collection was run, and no payment or agent message was sent as part of this implementation. Passing local tests and a dry-run callback demonstrates code-level behavior only; it is not production end-to-end validation.
+The new source-preset migration `202610290001_builtin_owner_scraper_sources.sql` has not been applied to a live Supabase project by this implementation. No worker image was built/deployed, no cron provider was configured, no live collection was run, and no payment or agent message was sent. Passing local tests and a dry-run callback demonstrates code-level behavior only; it is not production end-to-end validation.

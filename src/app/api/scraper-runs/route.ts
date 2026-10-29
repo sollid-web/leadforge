@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getSalesManagerContext } from "@/lib/sales-auth";
 import { assertPrivateDataEncryptionConfigured } from "@/lib/private-data";
+import { canonicalOwnerScraperSourceKey, ownerScraperSourceSupportsCity } from "@/lib/scraper-worker";
 
 const runSchema = z.object({
   sourceId: z.string().uuid(),
@@ -72,9 +73,10 @@ export async function POST(request: Request) {
   if (!source) return NextResponse.json({ error: "Source not found" }, { status: 404 });
   if (!source.approved || !source.active) return NextResponse.json({ error: "Source must be approved and active before a run can be dispatched" }, { status: 409 });
   if (!source.source_url) return NextResponse.json({ error: "Approved source must have an HTTPS base URL" }, { status: 400 });
+  const sourceKey = canonicalOwnerScraperSourceKey(source.source_key);
   const allowedHostSuffix: Record<string, string> = { craigslist: "craigslist.org", forsalebyowner: "forsalebyowner.com", byowner: "byowner.com" };
   const expectedSourceName: Record<string, string> = { craigslist: "Craigslist", forsalebyowner: "ForSaleByOwner.com", byowner: "ByOwner.com" };
-  const hostSuffix = allowedHostSuffix[source.source_key];
+  const hostSuffix = allowedHostSuffix[sourceKey];
   let approvedHost = "";
   try {
     const sourceUrl = new URL(source.source_url);
@@ -82,10 +84,11 @@ export async function POST(request: Request) {
     approvedHost = sourceUrl.hostname.toLowerCase();
   } catch { return NextResponse.json({ error: "Approved source URL is invalid" }, { status: 400 }); }
   if (!hostSuffix || !(approvedHost === hostSuffix || approvedHost.endsWith(`.${hostSuffix}`))) return NextResponse.json({ error: "This source is not one of the worker's configured owner-listing adapters or its host does not match the adapter" }, { status: 400 });
-  if (source.name !== expectedSourceName[source.source_key]) return NextResponse.json({ error: `Rename the approved source to exactly “${expectedSourceName[source.source_key]}” so the worker manifest retains source provenance for preview/import` }, { status: 400 });
+  if (source.name !== expectedSourceName[sourceKey]) return NextResponse.json({ error: `Rename the approved source to exactly “${expectedSourceName[sourceKey]}” so the worker manifest retains source provenance for preview/import` }, { status: 400 });
   if (!["approved_feed", "partner_feed"].includes(source.source_type)) return NextResponse.json({ error: "Scraper worker requires an approved external feed source" }, { status: 400 });
+  if (!ownerScraperSourceSupportsCity(sourceKey, parsed.data.city)) return NextResponse.json({ error: "This worker adapter does not have a configured search for the selected city." }, { status: 400 });
   const configuration = {
-    sourceKey: source.source_key,
+    sourceKey,
     sourceId: source.id,
     sourceName: source.name,
     sourceType: source.source_type,

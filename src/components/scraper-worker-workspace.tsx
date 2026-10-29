@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { StatusPill } from "@/components/dashboard-shell";
+import { canonicalOwnerScraperSourceKey, ownerScraperCitiesForSource } from "@/lib/owner-scraper-sources";
 
 type Source = { id: string; name: string; source_key: string; source_type: string; source_url: string | null; approved: boolean; active: boolean };
 type Run = { id: string; source_id: string; provider: string; status: string; discovered_count: number; imported_count: number; duplicate_count: number; rejected_count: number; held_count: number; contacts_found_count: number; error_message: string | null; started_at: string; completed_at: string | null; worker_configuration: Record<string, unknown>; worker_progress: Record<string, unknown>; worker_artifact_name: string | null; worker_heartbeat_at: string | null; authorization_reference: string | null };
@@ -93,7 +94,8 @@ export function ScraperWorkerWorkspace() {
     }
   }
 
-  const approvedSources = sources.filter((source) => source.approved && source.active);
+  const approvedSources = sources.filter((source) => source.approved && source.active && ["craigslist", "forsalebyowner", "byowner"].includes(canonicalOwnerScraperSourceKey(source.source_key)));
+  const availableCities = ownerScraperCitiesForSource(canonicalOwnerScraperSourceKey(approvedSources.find((source) => source.id === selectedSource)?.source_key ?? ""));
   return <>
     <div className="page-heading"><div><p className="eyebrow">Workspace / Collection runs</p><h1>Python scraper worker</h1><p className="subheading">The existing Python adapters run in an isolated worker. Recurring discovery is configured separately in Owner-seller scraper schedule; this page is for diagnostics and one-off test runs.</p></div><button className="secondary-button" onClick={() => void load()} disabled={loading}>Refresh runs</button></div>
     {error && <div className="workspace-alert error" role="alert">{error}</div>}{message && <div className="workspace-alert success" role="status">{message}</div>}
@@ -101,9 +103,9 @@ export function ScraperWorkerWorkspace() {
     {!workerConfigured && <div className="workspace-alert"><b>Worker configuration incomplete.</b> Configure the separate worker URL, shared token, trusted HTTPS app callback URL, and apply the new database migration before starting collection. No run was created by opening this page.</div>}
     <div className="content-grid"><section className="panel"><div className="panel-header"><div><h2>Configure a run</h2><p>Only approved, active LeadForge sources are selectable.</p></div></div>
       <form className="form-grid" onSubmit={startRun}>
-        <label className="field full"><span>Approved source</span><select value={selectedSource} onChange={(event) => setSelectedSource(event.target.value)} required><option value="">Select source</option>{approvedSources.map((source) => <option key={source.id} value={source.id}>{source.name} · {source.source_key}</option>)}</select></label>
+        <label className="field full"><span>Built-in owner-scraper source</span><select value={selectedSource} onChange={(event) => { const nextId = event.target.value; setSelectedSource(nextId); setCity(ownerScraperCitiesForSource(canonicalOwnerScraperSourceKey(approvedSources.find((source) => source.id === nextId)?.source_key ?? ""))[0] ?? ""); }} required><option value="">Select source</option>{approvedSources.map((source) => <option key={source.id} value={source.id}>{source.name}</option>)}</select></label>
         <label className="field"><span>Country</span><input value="United States (US)" readOnly /></label>
-        <label className="field"><span>City / market</span><select value={city} onChange={(event) => setCity(event.target.value)} required><option value="">Select exact configured label</option>{workerCities.map((label) => <option key={label} value={label}>{label}</option>)}</select></label>
+        <label className="field"><span>City / market</span><select value={availableCities.includes(city) ? city : ""} onChange={(event) => setCity(event.target.value)} required><option value="">Select exact configured label</option>{(availableCities.length ? availableCities : workerCities).map((label) => <option key={label} value={label}>{label}</option>)}</select></label>
         <label className="field"><span>Property type</span><input value="Unclassified / all (adapter cannot filter reliably)" readOnly /></label>
         <label className="field"><span>Listing intent</span><input value="Sale only (adapter capability)" readOnly /></label>
         <label className="field"><span>Maximum result count</span><input type="number" min={1} max={50} value={resultLimit} onChange={(event) => setResultLimit(Number(event.target.value))} /></label>
